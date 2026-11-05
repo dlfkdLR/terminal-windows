@@ -50,3 +50,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Hot paths stay fast even in debug builds: hashing a 7.9 GiB ISO and
+# encoding screenshots are unusably slow without optimization.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3

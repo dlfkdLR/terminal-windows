@@ -7,7 +7,7 @@
 | 1. 빌드 | ✅ 2026-11-05, macOS 26 arm64, Rust 1.96 | ⏳ CI(macos-13) | ⏳ CI(windows-latest) | ⏳ 백엔드 미구현 |
 | 2. CLI 실행 | ✅ 2026-11-05 (`doctor`/`ls`/`status`/`create` 오류 경로/`mcp`) | ⏳ | ⏳ | ⏳ |
 | 3. VM 부팅 | 🟡 2026-11-05 UEFI 펌웨어까지 (아래 실측 기록). Windows 미디어로는 미검증 | ⏳ | ⏳ swtpm 부재로 Win11 불가 예상 | ⏳ |
-| 4. Windows 설치 | ⏳ | ⏳ | ⏳ | ⏳ |
+| 4. Windows 설치 | 🟡 2026-11-05 Windows 11 26H2 ARM64(한국어) 설치 프로그램 부팅, 마우스·키보드로 언어→키보드→설치 옵션→제품 키 화면까지 진행 | ⏳ | ⏳ | ⏳ |
 | 5. 에이전트 연결 | ⏳ | ⏳ | ⏳ | ⏳ |
 | 6. 터미널 뷰어 | ⏳ (뷰어 미구현) | ⏳ | ⏳ | ⏳ |
 | 7. MCP 제어 | 🟡 2026-11-05 실제 VM(UEFI)에 stdio로 호출 성공. Claude Code/Codex 클라이언트 연동은 ⏳ | ⏳ | ⏳ | ⏳ |
@@ -31,7 +31,7 @@
 | 재시작, TPM 상태 파일 유지 | ✅ |
 | 실행 중 `delete` 거부 / 정지 후 삭제 | ✅ |
 | QEMU 업그레이드 모의(기록된 Cellar 경로 소실) → 펌웨어 재탐색 | ✅ |
-| 마우스(usb-tablet 절대좌표) | ⏳ UEFI 셸에 포인터가 없어 미검증 |
+| 마우스(usb-tablet 절대좌표) | ✅ Windows 설치 프로그램에서 버튼 클릭 정확 (커서가 지정 좌표에 위치) |
 
 실측으로 발견해 수정한 문제:
 1. **`tpm-tis-device` + HVF → `HV_BAD_ARGUMENT`**. TCG에서는 정상이고 HVF에서만 실패. 원인은 PPI RAM 영역(16 KiB 페이지 비정렬)으로 추정되며 `ppi=off`로 해결. Windows 11이 PPI 없이 설치되는지는 ⏳.
@@ -49,7 +49,8 @@
 | 공식 페이지 파싱 (ARM64 `3816`, x64 `3813`, 버전 26H2, 언어 38개 SHA-256) | ✅ |
 | SKU API (언어 목록) | ✅ |
 | 다운로드 링크 API | ❌ Microsoft Sentinel이 거부 (`ErrorSettings.SentinelReject`). 우회하지 않음 → 브라우저 대체 경로 |
-| 브라우저 대체 경로: 안내 출력 → 다운로드 폴더 감시 → 시간 초과 시 `image import` 안내 | ✅ (실제 ISO 완주는 ⏳ 사용자 다운로드 필요) |
+| 브라우저 대체 경로: 안내 → 다운로드 폴더 감시 → SHA-256 검증 → 캐시 이동 | ✅ 실제 7.90 GiB 한국어 ARM64 ISO로 완주, 공식 해시 일치 |
+| SHA-256 속도 | 디버그 빌드 15 MiB/s → `profile.dev.package.sha2 opt-level=3` 적용 후 186 MiB/s (약 12배), 릴리스 266 MiB/s |
 | 위조 파일 `image import` 거부 | ✅ |
 | 이어받기(Range) 다운로드, 감시, 캐시 | ✅ 로컬 테스트 서버로 자동 테스트 |
 
@@ -67,7 +68,7 @@
 | Homebrew `edk2-aarch64` 펌웨어에 Secure Boot 기능 플래그가 있는가 | ✅ 없음(`verbose-static`만). 경고 후 진행. Windows Setup 판정은 ⏳ |
 | HVF + `q35,smm=on` (Intel Mac Secure Boot 펌웨어) 동작 | ⏳ |
 | WHPX에서 `-cpu max`, `kernel-irqchip=off` 기본값의 타당성 | ⏳ |
-| Windows ARM64 설치 프로그램이 `usb-storage` CD를 인식 | ⏳ (UTM 구성 참고) |
+| Windows ARM64 설치 프로그램이 `usb-storage` CD를 인식 | ✅ |
 | QEMU `screendump format=png` (7.1+) | ✅ QEMU 11.1.3에서 PNG 동작 (PPM 폴백은 미실측) |
 | QEMU Windows 빌드의 `-chardev pipe` 서버 동작과 QMP | ⏳ |
 | virtio-serial 처리량 | ⏳ 벤치마크 예정 |
