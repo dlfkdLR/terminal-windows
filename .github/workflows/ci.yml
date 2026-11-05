@@ -14,9 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-14 = Apple Silicon, windows-latest = x64. Intel macOS binaries are
+        # macos-latest = Apple Silicon, windows-latest = x64. Intel macOS binaries are
         # cross-compiled in release.yml but not tested on Intel hardware in CI.
-        os: [macos-14, windows-latest, ubuntu-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

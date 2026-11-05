@@ -70,7 +70,7 @@ Windows 11 Setup refused to continue with "This PC must support Secure Boot". Ca
 | Debian AAVMF 2025.02 / 2026.08 (both secboot and no-secboot) | ❌ hangs at "Start boot option" (one vCPU at 100 %); fine under TCG | - |
 | UTM 5.0.8 secure | ✅ firmware runs, ❌ no ramfb, so with virtio-gpu the Windows screen freezes | - |
 | **Own build** (edk2 from QEMU 11.1.3 sources + `SECURE_BOOT_ENABLE`) | ✅ Windows Setup boots | ✅ passes (with TPM `ppi=off`) |
-| The same build compiled by GitHub Actions (macos-14), shipped in release v0.1.1 and installed with `firmware install` | ✅ Windows Setup boots (bytes differ from the local build, behaviour is the same) | confirmed with the local build |
+| The same build compiled by GitHub Actions (macos-14 at the time; the label was later retired, workflows now use macos-latest), shipped in release v0.1.1 and installed with `firmware install` | ✅ Windows Setup boots (bytes differ from the local build, behaviour is the same) | confirmed with the local build |
 
 Environment change: during this work `brew install lld` upgraded Homebrew's LLVM to 23, which broke Homebrew's Rust (1.96); `brew reinstall rust` repaired it and moved Rust to 1.99.1. All tests, clippy and fmt were re-checked on 1.99.1.
 
