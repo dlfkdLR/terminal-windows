@@ -352,6 +352,20 @@ impl VirtualizationBackend for QemuBackend {
             Endpoint::Unix(paths.qmp_view_socket())
         });
         let daemonize = cfg!(unix);
+        // Automatic installation: only for a VM whose disk is virgin and that has no Windows yet.
+        let unattend_path = paths.unattend_iso();
+        let unattend_iso =
+            if config.unattended && tw_core::install::unattended_allowed(config.install_iso.is_some(), &paths.efivars, &paths.disk) {
+                let culture = config.windows_language.as_deref().and_then(tw_core::unattend::culture_for_language);
+                let xml = tw_core::unattend::AnswerFile { arch: config.arch, culture, edition: "Windows 11 Pro" }.to_xml();
+                let iso = tw_core::iso9660::single_file_iso("UNATTEND", "AUTOUNATTEND.XML", xml.as_bytes()).map_err(TwError::backend)?;
+                secure::write_private_atomic(&unattend_path, &iso)?;
+                Some(unattend_path.as_path())
+            } else {
+                // A stale answer file must never stay around where it could wipe an installed disk.
+                let _ = std::fs::remove_file(&unattend_path);
+                None
+            };
         let plan = LaunchPlan {
             config,
             accelerator: accel,
@@ -365,6 +379,7 @@ impl VirtualizationBackend for QemuBackend {
             vnc,
             tpm_socket,
             daemonize,
+            unattend_iso,
             qemu_version: install.version,
         };
         let args = cmdline::qemu_args(&plan)?;

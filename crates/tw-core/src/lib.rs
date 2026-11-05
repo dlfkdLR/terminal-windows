@@ -9,11 +9,14 @@ pub mod control;
 pub mod coords;
 pub mod error;
 pub mod host;
+pub mod install;
+pub mod iso9660;
 pub mod model;
 pub mod name;
 pub mod secure;
 pub mod service;
 pub mod store;
+pub mod unattend;
 
 pub use error::{ErrorCode, TwError, TwResult};
 pub use name::VmName;

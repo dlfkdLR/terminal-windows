@@ -74,6 +74,16 @@ async fn verify_official(client: &Client, page: &PageInfo, path: &Path) -> TwRes
         .with_hint("The file may be incomplete, modified, or an older release. Unverified media can still be used explicitly with `create --iso PATH`."))
 }
 
+/// Microsoft's language name of an ISO: from the cache record when it is a cached image,
+/// otherwise from the culture in Microsoft's own file name (`..._ko-kr_...`).
+pub fn language_of_iso(store: &Store, iso: &Path) -> Option<String> {
+    if let Some(cached) = cache::list(&cache::images_dir(store.root())).into_iter().find(|c| c.path == iso) {
+        return Some(cached.record.language);
+    }
+    let name = iso.file_name()?.to_string_lossy().into_owned();
+    tw_core::unattend::culture_from_file_name(&name).map(|c| c.language.to_string())
+}
+
 fn record(page: &PageInfo, language: &str, sha: String, source: &str) -> ImageRecord {
     ImageRecord {
         file: cache::file_name(page.version.as_deref(), language, page.arch),

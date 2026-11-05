@@ -8,33 +8,13 @@
 use tw_core::service::VmService;
 use tw_core::{TwResult, VmName};
 
-/// The description Windows gives its UEFI boot entry.
-const BOOT_ENTRY: &str = "Windows Boot Manager";
-
-/// Whether `haystack` contains `text` encoded as UTF-16LE (how UEFI stores boot entry names).
-pub fn contains_utf16(haystack: &[u8], text: &str) -> bool {
-    let needle: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    !needle.is_empty() && haystack.windows(needle.len()).any(|w| w == needle.as_slice())
-}
-
-/// Whether the firmware's variable store holds the "Windows Boot Manager" boot entry, which
-/// Windows Setup registers once it has written its boot files. Unlike the disk size, this is
-/// not fooled by an installation that copied most files and was then interrupted.
-pub fn windows_registered(efivars: &std::path::Path) -> bool {
-    std::fs::read(efivars).is_ok_and(|bytes| contains_utf16(&bytes, BOOT_ENTRY))
-}
-
-/// True when the VM still has its installer attached and Windows has not registered itself,
-/// which is the only case in which a key press at the CD prompt is right. Pressing it on an
-/// installed VM would restart Setup instead of booting Windows.
-pub fn installer_needed(install_iso_attached: bool, windows_registered: bool) -> bool {
-    install_iso_attached && !windows_registered
-}
-
 /// Waits for the prompt and presses a key if this VM needs its installer.
 pub async fn assist(service: &VmService, name: &VmName) {
     let Ok(config) = service.load(name) else { return };
-    if !installer_needed(config.install_iso.is_some(), windows_registered(&service.store().paths(name).efivars)) {
+    if !tw_core::install::installer_needed(
+        config.install_iso.is_some(),
+        tw_core::install::windows_registered(&service.store().paths(name).efivars),
+    ) {
         return;
     }
     eprintln!("      waiting for the \"boot from CD\" prompt ...");
@@ -113,28 +93,5 @@ mod tests {
         assert!(!is_boot_prompt(&frame(&shell)), "text-filled screen");
         let tiny: Vec<(usize, usize)> = (0..10).map(|i| (i, 5)).collect();
         assert!(!is_boot_prompt(&frame(&tiny)), "a stray pixel row is not a prompt");
-    }
-
-    #[test]
-    fn installer_is_only_needed_for_a_vm_without_windows() {
-        assert!(installer_needed(true, false), "installer attached, Windows not registered");
-        assert!(!installer_needed(true, true), "Windows is installed: boot the disk");
-        assert!(!installer_needed(false, false), "no installer attached");
-    }
-
-    #[test]
-    fn finds_utf16_boot_entry_names() {
-        let mut store = vec![0xffu8; 1000];
-        assert!(!contains_utf16(&store, BOOT_ENTRY));
-        let entry: Vec<u8> = "Windows Boot Manager".encode_utf16().flat_map(u16::to_le_bytes).collect();
-        store[300..300 + entry.len()].copy_from_slice(&entry);
-        assert!(contains_utf16(&store, BOOT_ENTRY));
-        assert!(!contains_utf16(b"Windows Boot Manager", BOOT_ENTRY), "plain ASCII is not a UEFI name");
-        assert!(!contains_utf16(&store, ""));
-    }
-
-    #[test]
-    fn missing_variable_store_means_not_registered() {
-        assert!(!windows_registered(std::path::Path::new("/nonexistent/efivars.fd")));
     }
 }

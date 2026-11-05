@@ -69,6 +69,13 @@ pub struct MachineConfig {
     /// Optional driver media (for example virtio-win) attached as a second CD-ROM.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drivers_iso: Option<PathBuf>,
+    /// Install Windows automatically (answer file for partitions, edition and language). The
+    /// license page and account setup stay with the user.
+    #[serde(default)]
+    pub unattended: bool,
+    /// Microsoft's language name of the installation media (for example "Korean"), if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows_language: Option<String>,
     /// RFC 3339 creation time.
     pub created_at: String,
     /// Stable SMBIOS system UUID. Without it every QEMU VM reports the same
@@ -115,6 +122,8 @@ pub struct NewMachine {
     pub network: NetworkMode,
     pub install_iso: Option<PathBuf>,
     pub drivers_iso: Option<PathBuf>,
+    pub unattended: bool,
+    pub windows_language: Option<String>,
 }
 
 impl MachineConfig {
@@ -137,6 +146,8 @@ impl MachineConfig {
             tpm: true,
             install_iso: req.install_iso,
             drivers_iso: req.drivers_iso,
+            unattended: req.unattended,
+            windows_language: req.windows_language,
             created_at,
             smbios_uuid: random_uuid(),
         };
@@ -227,6 +238,8 @@ mod tests {
             network: NetworkMode::Nat,
             install_iso: Some(PathBuf::from("/media/Win11_ARM64.iso")),
             drivers_iso: None,
+            unattended: false,
+            windows_language: None,
         }
     }
 

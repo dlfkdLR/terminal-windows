@@ -74,6 +74,10 @@ enum Command {
         /// No guest network device.
         #[arg(long)]
         offline: bool,
+        /// Install Windows automatically (partitions, edition, language). The license page and the
+        /// account setup stay interactive.
+        #[arg(long)]
+        unattended: bool,
     },
     /// Boot a VM (headless; view it with `view` or control it with `action`).
     Start {
@@ -197,6 +201,9 @@ enum Command {
         /// Use the automatic settings without asking.
         #[arg(long)]
         auto: bool,
+        /// Do not install Windows automatically; click through Windows Setup yourself.
+        #[arg(long)]
+        manual_install: bool,
     },
     /// Computer-use actions on a running VM.
     Action {
@@ -382,6 +389,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             disk: None,
             custom: false,
             auto: false,
+            manual_install: false,
         },
         None => {
             use clap::CommandFactory;
@@ -437,7 +445,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
         }
         Command::Firmware { command } => firmware_cmd::run(command, &store, host, out).await?,
         Command::Image { command } => media::run(command, &store, host, out).await?,
-        Command::Create { name, iso, drivers_iso, arch, cpus, memory, disk, width, height, offline } => {
+        Command::Create { name, iso, drivers_iso, arch, cpus, memory, disk, width, height, offline, unattended } => {
             let arch = match arch {
                 Some(a) => a,
                 None => host.native_guest_arch()?,
@@ -449,6 +457,23 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 _ => return Err(TwError::invalid("--width and --height must be given together")),
             };
             let abs = |p: PathBuf| std::path::absolute(&p).unwrap_or(p);
+            let install_iso: PathBuf = match iso {
+                Some(p) => abs(p),
+                None => {
+                    let cached = tw_media::cache::find(&tw_media::cache::images_dir(store.root()), arch, None).ok_or_else(|| {
+                        TwError::not_found(format!("no verified Windows 11 {} image in the cache", arch.windows_name()))
+                            .with_hint("terminal-windows image download   (or pass --iso /path/to/Win11.iso)")
+                    })?;
+                    eprintln!(
+                        "Using cached image {} ({}, {})",
+                        cached.path.display(),
+                        cached.record.language,
+                        cached.record.version.as_deref().unwrap_or("?")
+                    );
+                    cached.path
+                }
+            };
+            let windows_language = media::language_of_iso(&store, &install_iso);
             let request = NewMachine {
                 name,
                 backend: BackendKind::Qemu,
@@ -458,23 +483,10 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 disk_gib: disk,
                 display,
                 network: if offline { NetworkMode::Offline } else { NetworkMode::Nat },
-                install_iso: Some(match iso {
-                    Some(p) => abs(p),
-                    None => {
-                        let cached = tw_media::cache::find(&tw_media::cache::images_dir(store.root()), arch, None).ok_or_else(|| {
-                            TwError::not_found(format!("no verified Windows 11 {} image in the cache", arch.windows_name()))
-                                .with_hint("terminal-windows image download   (or pass --iso /path/to/Win11.iso)")
-                        })?;
-                        eprintln!(
-                            "Using cached image {} ({}, {})",
-                            cached.path.display(),
-                            cached.record.language,
-                            cached.record.version.as_deref().unwrap_or("?")
-                        );
-                        cached.path
-                    }
-                }),
+                install_iso: Some(install_iso.clone()),
                 drivers_iso: drivers_iso.map(abs),
+                unattended,
+                windows_language,
             };
             let host_cpus = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2);
             let config = service.create(request, host_cpus, now_rfc3339()).await?;
@@ -551,9 +563,22 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             });
         }
         Command::Window { name } => window_ctl::run_window(&service, &name).await?,
-        Command::Up { name, iso, language, no_view, detach, plan, yes, cpus, memory, disk, custom, auto } => {
-            let options =
-                up::UpOptions { name, iso, language, no_view, detach, plan, yes, cpus, memory_gib: memory, disk_gib: disk, custom, auto };
+        Command::Up { name, iso, language, no_view, detach, plan, yes, cpus, memory, disk, custom, auto, manual_install } => {
+            let options = up::UpOptions {
+                name,
+                iso,
+                language,
+                no_view,
+                detach,
+                plan,
+                yes,
+                cpus,
+                memory_gib: memory,
+                disk_gib: disk,
+                custom,
+                auto,
+                manual_install,
+            };
             up::run(options, &store, &service, &backend, host, out).await?
         }
         Command::Delete { name, force } => {

@@ -82,6 +82,8 @@ fn request(dir: &std::path::Path) -> NewMachine {
         network: NetworkMode::Nat,
         install_iso: Some(iso),
         drivers_iso: None,
+        unattended: false,
+        windows_language: None,
     }
 }
 

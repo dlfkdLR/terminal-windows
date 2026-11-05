@@ -58,6 +58,9 @@ pub struct LaunchPlan<'a> {
     pub vnc: VncEndpoint,
     pub tpm_socket: Option<PathBuf>,
     pub daemonize: bool,
+    /// CD with `autounattend.xml` for an automatic installation. Attached as the last CD and never
+    /// as a boot device; only present while a virgin disk is being installed.
+    pub unattend_iso: Option<&'a Path>,
     /// Detected QEMU version; selects between old and new option spellings.
     pub qemu_version: Option<(u32, u32, u32)>,
 }
@@ -142,6 +145,9 @@ pub fn qemu_args(plan: &LaunchPlan<'_>) -> TwResult<Vec<String>> {
         cds.push((iso, "0"));
     }
     if let Some(iso) = &c.drivers_iso {
+        cds.push((iso, ""));
+    }
+    if let Some(iso) = plan.unattend_iso {
         cds.push((iso, ""));
     }
     for (i, (iso, bootindex)) in cds.iter().enumerate() {
@@ -267,6 +273,8 @@ mod tests {
                 network,
                 install_iso: iso.then(|| PathBuf::from("/media/Win11,ARM64.iso")),
                 drivers_iso: iso.then(|| PathBuf::from("/media/virtio-win.iso")),
+                unattended: false,
+                windows_language: None,
             },
             8,
             "t".into(),
@@ -301,6 +309,7 @@ mod tests {
             vnc: VncEndpoint::Unix("/run/tw/vnc.sock".into()),
             tpm_socket: Some("/run/tw/swtpm-ctrl.sock".into()),
             daemonize: true,
+            unattend_iso: None,
             qemu_version: Some((11, 1, 3)),
         }
     }
@@ -369,6 +378,20 @@ mod tests {
         assert!(pair(&args, "-vnc", "127.0.0.1:17,password=on"));
         assert!(pair(&args, "-device", "e1000e,netdev=net0"));
         assert!(!args.contains(&"-daemonize".to_string()));
+    }
+
+    #[test]
+    fn answer_file_cd_is_attached_last_and_never_bootable() {
+        let c = config(Arch::Aarch64, NetworkMode::Nat, true);
+        let fw = firmware(false);
+        let mut p = plan(&c, &fw, "hvf");
+        let unattend = PathBuf::from("/vm/dev/unattend.iso");
+        p.unattend_iso = Some(&unattend);
+        let args = qemu_args(&p).unwrap();
+        assert!(pair(&args, "-drive", "if=none,id=cd2,media=cdrom,readonly=on,file=/vm/dev/unattend.iso"));
+        assert!(pair(&args, "-device", "usb-storage,drive=cd2,bus=xhci.0,removable=on"), "no bootindex for the answer-file CD");
+        let without = qemu_args(&plan(&c, &fw, "hvf")).unwrap();
+        assert!(!joined(&without).contains("unattend"), "not attached unless requested");
     }
 
     #[test]

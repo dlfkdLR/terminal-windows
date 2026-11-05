@@ -48,8 +48,17 @@ In a terminal, running `terminal-windows` with no command does everything that i
 1. installs QEMU and swtpm with Homebrew (asks first; `--yes` skips the question),
 2. installs the Secure Boot firmware (Apple Silicon),
 3. downloads Windows 11 from Microsoft in your system language and verifies its SHA-256 (the final download click happens in your browser, see below),
-4. asks how to create the VM (see below), then creates and boots it, pressing the "boot from CD" key at the right moment,
+4. asks how to create the VM (see below), then creates and boots it, pressing the "boot from CD" key at the right moment, and **installs Windows automatically** (see below),
 5. opens the viewer: inside the terminal where that works, otherwise in a native window (Ctrl+] or closing the window leaves it; the VM keeps running).
+
+### Automatic Windows installation
+
+Like terminal-mac, which installs macOS through Apple's API and leaves only the account setup to you, terminal-windows lets Windows Setup run by itself with an answer file: language (taken from the ISO), wiping the VM's own empty disk, partitions, and the **Windows 11 Pro** edition. Two things stay yours on purpose:
+
+- **the license agreement page**: you click "Agree" in the viewer, once;
+- **the account setup (OOBE)** after the installation: name, account, privacy choices.
+
+No product key is entered (Windows installs unactivated, the same as choosing "I don't have a product key") and no requirement is bypassed. The answer file is only attached to a VM whose disk is brand new and that has no Windows yet, so it can never wipe a disk that holds data or an installed Windows. `terminal-windows up --manual-install` (or leaving `--unattended` off in `create`) lets you click through Setup yourself instead. An ISO whose language is not known (a renamed file you imported) keeps the language page interactive.
 
 ### Automatic or custom VM
 

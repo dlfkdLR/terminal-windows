@@ -63,6 +63,10 @@ impl MachinePaths {
     pub fn swtpm_socket(&self) -> PathBuf {
         self.runtime.join("swtpm-ctrl.sock")
     }
+    /// The answer-file CD; only exists while a virgin disk is being installed.
+    pub fn unattend_iso(&self) -> PathBuf {
+        self.dir.join("unattend.iso")
+    }
     pub fn pid_file(&self) -> PathBuf {
         self.runtime.join("qemu.pid")
     }
@@ -274,6 +278,8 @@ mod tests {
                 network: NetworkMode::Offline,
                 install_iso: None,
                 drivers_iso: None,
+                unattended: false,
+                windows_language: None,
             },
             8,
             "t".into(),

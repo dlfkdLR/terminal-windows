@@ -167,6 +167,8 @@ pub struct UpOptions {
     pub custom: bool,
     /// Never ask: use the automatic settings.
     pub auto: bool,
+    /// Do not install Windows automatically; walk through Setup yourself.
+    pub manual_install: bool,
 }
 
 /// Language for the Windows image, from the system locale (Microsoft's spelling).
@@ -372,15 +374,22 @@ pub async fn run(
 
     // 3. Windows image and VM.
     if !exists {
-        let iso = match opts.iso.clone() {
-            Some(p) => std::path::absolute(&p).unwrap_or(p),
+        // The path of the image and, only when it is actually known, its language. A wrong
+        // language in the answer file could make Setup reject it, so it is never guessed.
+        let (iso, iso_language) = match opts.iso.clone() {
+            Some(p) => {
+                let p = std::path::absolute(&p).unwrap_or(p);
+                let lang = super::media::language_of_iso(store, &p);
+                (p, lang)
+            }
             None => {
                 let dir = cache::images_dir(store.root());
                 if let Some(c) = cache::find(&dir, arch, None) {
-                    c.path
+                    (c.path, Some(c.record.language))
                 } else {
                     next(&format!("Getting Windows 11 ({language}) from Microsoft"));
-                    media::download_image(store, arch, &language, false, 180).await?.0.path
+                    let image = media::download_image(store, arch, &language, false, 180).await?.0;
+                    (image.path, Some(image.record.language))
                 }
             }
         };
@@ -395,8 +404,10 @@ pub async fn run(
             disk_gib: Some(chosen.disk_gib),
             display: None,
             network: chosen.network,
-            install_iso: Some(iso),
+            install_iso: Some(iso.clone()),
             drivers_iso: None,
+            unattended: !opts.manual_install,
+            windows_language: iso_language,
         };
         service.create(request, resources.cpus, super::now_rfc3339()).await?;
     }
@@ -557,6 +568,8 @@ mod tests {
                     network: NetworkMode::Nat,
                     install_iso: None,
                     drivers_iso: None,
+                    unattended: false,
+                    windows_language: None,
                 },
                 8,
                 "t".into(),
