@@ -86,11 +86,22 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        remove_leftover_frames();
         let mut out = std::io::stdout();
         let _ = out.write_all(b"\x1b_Ga=d,d=I,i=2,q=2;\x1b\\\x1b_Ga=d,d=I,i=3,q=2;\x1b\\");
         let _ = out.write_all(b"\x1b[0m\x1b[2J\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l");
         let _ = out.flush();
         let _ = terminal::disable_raw_mode();
+    }
+}
+
+/// Frame files the terminal never consumed (it deletes them itself when it does).
+fn remove_leftover_frames() {
+    let prefix = format!("tty-graphics-protocol-tw-{}-", std::process::id());
+    for entry in std::fs::read_dir(std::env::temp_dir()).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 
@@ -134,7 +145,7 @@ fn spawn_stdin_reader() -> mpsc::Receiver<Vec<u8>> {
 /// Asks the terminal what it supports. Environment variables are not trusted.
 async fn probe(stdin: &mut mpsc::Receiver<Vec<u8>>, filter: &mut MetricFilter) -> TwResult<Transport> {
     let probe_file = temp_path("probe", 0);
-    std::fs::write(&probe_file, [0u8, 0, 0]).map_err(|e| TwError::io(probe_file.display(), e))?;
+    tw_core::secure::write_private_atomic(&probe_file, &[0u8, 0, 0])?;
     write_out(&format!("{}{}\x1b[c", kitty::temp_file_query(&probe_file), kitty::support_query()));
     let deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
     while filter.device_attributes.is_none() {
@@ -243,7 +254,7 @@ pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
                     let escape = match transport {
                         Transport::TempFile => {
                             let path = temp_path("frame", seq);
-                            if std::fs::write(&path, &frame.rgb).is_err() { continue; }
+                            if tw_core::secure::write_private_atomic(&path, &frame.rgb).is_err() { continue; }
                             encoder.frame_temp_file(&path, frame.width, frame.height, l.columns, l.rows)
                         }
                         Transport::Direct => {
