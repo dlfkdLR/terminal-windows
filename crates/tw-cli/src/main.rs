@@ -14,6 +14,7 @@ use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
 mod media;
+mod view;
 
 #[derive(Parser, Debug)]
 #[command(name = "terminal-windows", version, about = "Run and control Windows virtual machines from a terminal")]
@@ -89,7 +90,7 @@ enum Command {
     /// List VMs.
     #[command(alias = "list")]
     Ls,
-    /// View the desktop inside the terminal (not implemented yet).
+    /// View and control the desktop inside the terminal (Kitty graphics: Ghostty, Kitty, WezTerm).
     View {
         name: VmName,
     },
@@ -409,7 +410,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                     .join("\n")
             });
         }
-        Command::View { .. } => return Err(not_implemented("view", "P5")),
+        Command::View { name } => view::run(&service, &name).await?,
         Command::Show { .. } | Command::Hide { .. } => return Err(not_implemented("show/hide", "P5")),
         Command::Up => return Err(not_implemented("up", "P5/P7")),
         Command::Delete { name, force } => {

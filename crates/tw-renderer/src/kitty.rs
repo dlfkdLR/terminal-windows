@@ -53,6 +53,21 @@ impl KittyEncoder {
         out
     }
 
+    /// Places raw RGB24 pixels from a temporary file (`t=t`): the terminal reads
+    /// the file and deletes it. Nothing large goes through the pty and no PNG
+    /// encoding is needed. Kitty requires the path to be in a temp directory and
+    /// to contain `tty-graphics-protocol`.
+    pub fn frame_temp_file(&mut self, path: &std::path::Path, width: u32, height: u32, columns: u32, rows: u32) -> String {
+        let next = if self.current == 2 { 3 } else { 2 };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(path.to_string_lossy().as_bytes());
+        let mut out = format!("\x1b_Ga=T,t=t,f=24,s={width},v={height},i={next},q=2,C=1,c={columns},r={rows},z={Z_INDEX};{b64}\x1b\\");
+        if self.current != 0 {
+            out.push_str(&delete(self.current));
+        }
+        self.current = next;
+        out
+    }
+
     /// Removes any image this encoder placed. Call before leaving the alternate screen.
     pub fn clear(&mut self) -> String {
         self.current = 0;
@@ -62,6 +77,13 @@ impl KittyEncoder {
 
 fn delete(id: u32) -> String {
     format!("\x1b_Ga=d,d=I,i={id},q=2;\x1b\\")
+}
+
+/// Query proving the terminal can read temporary files (`t=t`) for `path`
+/// (a 1×1 RGB file). The reply arrives as `ESC _ G i=32;OK ESC \`.
+pub fn temp_file_query(path: &std::path::Path) -> String {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(path.to_string_lossy().as_bytes());
+    format!("\x1b_Gi=32,s=1,v=1,a=q,t=t,f=24;{b64}\x1b\\")
 }
 
 /// Query whose `OK` reply proves the terminal implements Kitty graphics.
@@ -86,5 +108,8 @@ mod tests {
         assert!(second.starts_with("\x1b_Ga=T,f=100,i=3,"));
         assert!(second.ends_with("\x1b_Ga=d,d=I,i=2,q=2;\x1b\\"));
         assert_eq!(enc.clear().matches("a=d").count(), 2);
+        let f = enc.frame_temp_file(std::path::Path::new("/tmp/tty-graphics-protocol-x.rgb"), 800, 600, 100, 37);
+        assert!(f.starts_with("\x1b_Ga=T,t=t,f=24,s=800,v=600,i=2,"));
+        assert!(f.contains("c=100,r=37"));
     }
 }

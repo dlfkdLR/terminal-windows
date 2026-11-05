@@ -63,6 +63,9 @@ impl VirtualizationBackend for Mock {
     async fn console(&self, _: &MachineConfig, _: &MachinePaths) -> TwResult<Box<dyn ComputerControl>> {
         Err(TwError::unsupported("mock has no console"))
     }
+    async fn interactive_console(&self, _: &MachineConfig, _: &MachinePaths) -> TwResult<Box<dyn tw_core::control::InteractiveConsole>> {
+        Err(TwError::unsupported("mock has no console"))
+    }
 }
 
 fn request(dir: &std::path::Path) -> NewMachine {

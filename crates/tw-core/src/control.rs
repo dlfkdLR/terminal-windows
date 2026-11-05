@@ -63,6 +63,26 @@ pub trait ComputerControl: Send + Sync {
     async fn key(&self, chord: &str) -> TwResult<()>;
 }
 
+/// A raw RGB24 frame of the guest display.
+#[derive(Debug, Clone)]
+pub struct RawFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+}
+
+/// Low-level console access for the interactive viewer: raw frames and
+/// separate press/release events (needed for dragging and held keys).
+#[async_trait]
+pub trait InteractiveConsole: ComputerControl {
+    async fn frame(&self) -> TwResult<RawFrame>;
+    /// Moves the pointer to a pixel of a frame of size `frame_size`.
+    async fn pointer(&self, x: u32, y: u32, frame_size: (u32, u32)) -> TwResult<()>;
+    async fn button(&self, button: MouseButton, down: bool) -> TwResult<()>;
+    /// One wheel notch; `up` scrolls content up.
+    async fn wheel(&self, up: bool) -> TwResult<()>;
+}
+
 /// Shared argument validation so every plane rejects the same inputs.
 pub fn validate_point(x: u32, y: u32, size: (u32, u32)) -> TwResult<()> {
     if x >= size.0 || y >= size.1 {

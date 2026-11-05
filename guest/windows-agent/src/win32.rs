@@ -111,7 +111,7 @@ impl Desktop for Win32Desktop {
     }
 
     fn move_abs(&mut self, nx: u32, ny: u32) -> DResult<()> {
-        Self::send(&[Self::mouse(nx as i32, ny as i32, 0, (MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE) as u32)])
+        Self::send(&[Self::mouse(nx as i32, ny as i32, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)])
     }
 
     fn button(&mut self, button: Button, down: bool) -> DResult<()> {
@@ -123,18 +123,18 @@ impl Desktop for Win32Desktop {
             (Button::Middle, true) => MOUSEEVENTF_MIDDLEDOWN,
             (Button::Middle, false) => MOUSEEVENTF_MIDDLEUP,
         };
-        Self::send(&[Self::mouse(0, 0, 0, flag as u32)])
+        Self::send(&[Self::mouse(0, 0, 0, flag)])
     }
 
     fn wheel(&mut self, delta: i32, horizontal: bool) -> DResult<()> {
         let flag = if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL };
-        Self::send(&[Self::mouse(0, 0, delta, flag as u32)])
+        Self::send(&[Self::mouse(0, 0, delta, flag)])
     }
 
     fn vk(&mut self, vk: u16, down: bool) -> DResult<()> {
-        let mut flags = if down { 0 } else { KEYEVENTF_KEYUP as u32 };
+        let mut flags = if down { 0 } else { KEYEVENTF_KEYUP };
         if extended(vk) {
-            flags |= KEYEVENTF_EXTENDEDKEY as u32;
+            flags |= KEYEVENTF_EXTENDEDKEY;
         }
         Self::send(&[Self::key(vk, 0, flags)])
     }
@@ -142,8 +142,8 @@ impl Desktop for Win32Desktop {
     fn unicode(&mut self, units: &[u16]) -> DResult<()> {
         let mut inputs = Vec::with_capacity(units.len() * 2);
         for &u in units {
-            inputs.push(Self::key(0, u, KEYEVENTF_UNICODE as u32));
-            inputs.push(Self::key(0, u, (KEYEVENTF_UNICODE | KEYEVENTF_KEYUP) as u32));
+            inputs.push(Self::key(0, u, KEYEVENTF_UNICODE));
+            inputs.push(Self::key(0, u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
         }
         Self::send(&inputs)
     }

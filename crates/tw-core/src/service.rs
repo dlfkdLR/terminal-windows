@@ -2,7 +2,7 @@
 //! viewer, so lifecycle logic is implemented exactly once.
 
 use crate::backend::{StartOptions, StopMode, VirtualizationBackend, VmState, VmStatus};
-use crate::control::ComputerControl;
+use crate::control::{ComputerControl, InteractiveConsole};
 use crate::error::{ErrorCode, TwError, TwResult};
 use crate::model::{MachineConfig, NewMachine};
 use crate::name::VmName;
@@ -123,6 +123,16 @@ impl VmService {
             }
         }
         self.store.delete(name, &lock)
+    }
+
+    /// Console for the interactive viewer. Requires a running or paused VM.
+    pub async fn interactive_console(&self, name: &VmName) -> TwResult<Box<dyn InteractiveConsole>> {
+        let config = self.store.load(name)?;
+        let paths = self.store.paths(name);
+        match self.backend.status(&config, &paths).await?.state {
+            VmState::Stopped => Err(TwError::state(format!("VM '{name}' is stopped")).with_hint(format!("terminal-windows start {name}"))),
+            _ => self.backend.interactive_console(&config, &paths).await,
+        }
     }
 
     /// Hypervisor-plane control. Requires a running VM.

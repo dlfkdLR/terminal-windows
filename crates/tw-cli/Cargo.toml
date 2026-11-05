@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+crossterm = "0.28"
 dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,6 +21,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tw-core.workspace = true
+tw-input.workspace = true
 tw-mcp.workspace = true
 tw-media.workspace = true
 tw-qemu.workspace = true

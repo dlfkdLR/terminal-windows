@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
-use tw_core::control::{self, ComputerControl, MouseButton, ScreenSource, Screenshot};
+use tw_core::control::{self, ComputerControl, InteractiveConsole, MouseButton, RawFrame, ScreenSource, Screenshot};
 use tw_core::coords::to_qemu_abs;
 use tw_core::{ErrorCode, TwError, TwResult};
 use tw_input::keys::{us_ascii_key, Chord};
@@ -217,6 +217,38 @@ impl<S: AsyncRead + AsyncWrite + Send + 'static> ComputerControl for QmpConsole<
         let mut events: Vec<_> = codes.iter().map(|c| input::key(c, true)).collect();
         events.extend(codes.iter().rev().map(|c| input::key(c, false)));
         self.send_keys_paced(events).await
+    }
+}
+
+#[async_trait]
+impl<S: AsyncRead + AsyncWrite + Send + 'static> InteractiveConsole for QmpConsole<S> {
+    /// PPM screendump: raw pixels, no PNG encode/decode on the hot path.
+    async fn frame(&self) -> TwResult<RawFrame> {
+        let file = self.scratch.join(format!("frame-{}.ppm", std::process::id()));
+        let path = file.to_string_lossy().into_owned();
+        self.qmp.lock().await.execute("screendump", Some(json!({ "filename": path }))).await?;
+        let ppm = read_and_remove(&file)?;
+        let (width, height, rgb) = image::decode_ppm(&ppm)?;
+        *self.size.lock().await = Some((width, height));
+        Ok(RawFrame { width, height, rgb })
+    }
+
+    async fn pointer(&self, x: u32, y: u32, frame_size: (u32, u32)) -> TwResult<()> {
+        let (w, h) = frame_size;
+        self.send(vec![
+            input::abs("x", to_qemu_abs(x.min(w.saturating_sub(1)), w)),
+            input::abs("y", to_qemu_abs(y.min(h.saturating_sub(1)), h)),
+        ])
+        .await
+    }
+
+    async fn button(&self, button: MouseButton, down: bool) -> TwResult<()> {
+        self.send(vec![input::btn(button_name(button), down)]).await
+    }
+
+    async fn wheel(&self, up: bool) -> TwResult<()> {
+        let name = if up { "wheel-up" } else { "wheel-down" };
+        self.send(vec![input::btn(name, true), input::btn(name, false)]).await
     }
 }
 

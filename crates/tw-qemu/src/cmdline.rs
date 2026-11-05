@@ -52,6 +52,8 @@ pub struct LaunchPlan<'a> {
     pub efivars: &'a Path,
     pub pid_file: &'a Path,
     pub qmp: Endpoint,
+    /// Optional second QMP monitor for the interactive viewer.
+    pub qmp_view: Option<Endpoint>,
     pub agent: Endpoint,
     pub vnc: VncEndpoint,
     pub tpm_socket: Option<PathBuf>,
@@ -185,13 +187,20 @@ pub fn qemu_args(plan: &LaunchPlan<'_>) -> TwResult<Vec<String>> {
 
     // Control (Plane H) and display export. Always headless: QEMU cannot hide
     // or re-show its own window at runtime, so viewers attach separately.
-    let qmp = plan.qmp.chardev("qmp0", true);
-    push(&["-chardev", &qmp]);
-    // QEMU 11 deprecates `-mon` in favour of `-object monitor-qmp`.
-    if plan.qemu_version.is_some_and(|v| v >= (11, 0, 0)) {
-        push(&["-object", "monitor-qmp,id=mon0,chardev=qmp0"]);
-    } else {
-        push(&["-mon", "chardev=qmp0,mode=control"]);
+    let mut monitors = vec![("qmp0", "mon0", plan.qmp.clone())];
+    if let Some(view) = &plan.qmp_view {
+        monitors.push(("qmp1", "mon1", view.clone()));
+    }
+    for (chardev, mon, endpoint) in monitors {
+        let spec = endpoint.chardev(chardev, true);
+        push(&["-chardev", &spec]);
+        // QEMU 11 deprecates `-mon` in favour of `-object monitor-qmp`.
+        let monitor = if plan.qemu_version.is_some_and(|v| v >= (11, 0, 0)) {
+            ("-object", format!("monitor-qmp,id={mon},chardev={chardev}"))
+        } else {
+            ("-mon", format!("chardev={chardev},mode=control"))
+        };
+        push(&[monitor.0, &monitor.1]);
     }
     match &plan.vnc {
         VncEndpoint::Unix(path) => {
@@ -287,6 +296,7 @@ mod tests {
             efivars: Path::new("/vm/dev/efivars.fd"),
             pid_file: Path::new("/run/tw/qemu.pid"),
             qmp: Endpoint::Unix("/run/tw/qmp.sock".into()),
+            qmp_view: Some(Endpoint::Unix("/run/tw/qmpv.sock".into())),
             agent: Endpoint::Unix("/run/tw/agent.sock".into()),
             vnc: VncEndpoint::Unix("/run/tw/vnc.sock".into()),
             tpm_socket: Some("/run/tw/swtpm-ctrl.sock".into()),
@@ -314,6 +324,8 @@ mod tests {
         assert!(pair(&args, "-device", "ramfb"));
         assert!(pair(&args, "-device", "tpm-tis-device,tpmdev=tpm0,ppi=off"));
         assert!(pair(&args, "-object", "monitor-qmp,id=mon0,chardev=qmp0"));
+        assert!(pair(&args, "-object", "monitor-qmp,id=mon1,chardev=qmp1"));
+        assert!(pair(&args, "-chardev", "socket,id=qmp1,path=/run/tw/qmpv.sock,server=on,wait=off"));
         assert!(pair(&args, "-device", "nvme,drive=disk0,serial=tw-disk0,bootindex=1"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd0,bus=xhci.0,removable=on,bootindex=0"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd1,bus=xhci.0,removable=on"));

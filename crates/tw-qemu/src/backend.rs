@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 use tw_core::backend::{Capabilities, StartOptions, StopMode, Support, VirtualizationBackend, VmState, VmStatus};
-use tw_core::control::ComputerControl;
+use tw_core::control::{ComputerControl, InteractiveConsole};
 use tw_core::host::{Arch, HostInfo, HostOs};
 use tw_core::model::{BackendKind, MachineConfig};
 use tw_core::secure;
@@ -100,6 +100,32 @@ impl QemuBackend {
     #[cfg(windows)]
     async fn connect(&self, paths: &MachinePaths) -> TwResult<Option<crate::qmp::Qmp<tokio::net::windows::named_pipe::NamedPipeClient>>> {
         let (Endpoint::NamedPipe(name), _, _) = self.endpoints(paths) else { unreachable!() };
+        match crate::qmp::connect_pipe(&name, QMP_TIMEOUT).await {
+            Ok(q) => Ok(Some(q)),
+            Err(e) if e.code == ErrorCode::Io => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    #[cfg(unix)]
+    async fn connect_view(&self, paths: &MachinePaths) -> TwResult<Option<crate::qmp::Qmp<tokio::net::UnixStream>>> {
+        let sock = paths.qmp_view_socket();
+        if !sock.exists() {
+            return Ok(None);
+        }
+        match crate::qmp::connect_unix(&sock, QMP_TIMEOUT).await {
+            Ok(q) => Ok(Some(q)),
+            Err(e) if e.code == ErrorCode::Io => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    #[cfg(windows)]
+    async fn connect_view(
+        &self,
+        paths: &MachinePaths,
+    ) -> TwResult<Option<crate::qmp::Qmp<tokio::net::windows::named_pipe::NamedPipeClient>>> {
+        let name = format!("tw-{}-qmpv", pipe_tag(&paths.dir));
         match crate::qmp::connect_pipe(&name, QMP_TIMEOUT).await {
             Ok(q) => Ok(Some(q)),
             Err(e) if e.code == ErrorCode::Io => Ok(None),
@@ -312,6 +338,11 @@ impl VirtualizationBackend for QemuBackend {
         };
 
         let (qmp, agent, vnc) = self.endpoints(paths);
+        let qmp_view = Some(if self.host.os == HostOs::Windows {
+            Endpoint::NamedPipe(format!("tw-{}-qmpv", pipe_tag(&paths.dir)))
+        } else {
+            Endpoint::Unix(paths.qmp_view_socket())
+        });
         let daemonize = cfg!(unix);
         let plan = LaunchPlan {
             config,
@@ -321,6 +352,7 @@ impl VirtualizationBackend for QemuBackend {
             efivars: &paths.efivars,
             pid_file: &paths.pid_file(),
             qmp,
+            qmp_view,
             agent,
             vnc,
             tpm_socket,
@@ -401,6 +433,16 @@ impl VirtualizationBackend for QemuBackend {
         };
         let (status, _) = qmp.query_status().await?;
         Ok(VmStatus { name, state: map_state(&status), pid: read_pid(paths), detail: Some(format!("qemu status: {status}")) })
+    }
+
+    async fn interactive_console(&self, config: &MachineConfig, paths: &MachinePaths) -> TwResult<Box<dyn InteractiveConsole>> {
+        match self.connect_view(paths).await? {
+            Some(qmp) => Ok(Box::new(crate::console::QmpConsole::new(qmp, paths.runtime.clone()))),
+            None => Err(TwError::state(format!("VM '{}' has no viewer monitor socket", config.name)).with_hint(format!(
+                "It was started by an older terminal-windows. Restart it once: terminal-windows stop {0} && terminal-windows start {0}",
+                config.name
+            ))),
+        }
     }
 
     async fn console(&self, config: &MachineConfig, paths: &MachinePaths) -> TwResult<Box<dyn ComputerControl>> {

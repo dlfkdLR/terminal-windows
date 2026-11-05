@@ -1,6 +1,6 @@
 //! Virtualization backend abstraction and the capability model.
 
-use crate::control::ComputerControl;
+use crate::control::{ComputerControl, InteractiveConsole};
 use crate::error::TwResult;
 use crate::host::Arch;
 use crate::model::{BackendKind, MachineConfig};
@@ -99,4 +99,6 @@ pub trait VirtualizationBackend: Send + Sync {
     async fn status(&self, config: &MachineConfig, paths: &MachinePaths) -> TwResult<VmStatus>;
     /// Hypervisor-plane control of a running VM.
     async fn console(&self, config: &MachineConfig, paths: &MachinePaths) -> TwResult<Box<dyn ComputerControl>>;
+    /// Console for the interactive viewer, on a connection separate from `console`.
+    async fn interactive_console(&self, config: &MachineConfig, paths: &MachinePaths) -> TwResult<Box<dyn InteractiveConsole>>;
 }

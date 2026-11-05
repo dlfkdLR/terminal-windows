@@ -95,6 +95,8 @@ keys! {
     "comma" => ("comma", 0xBC), alias ",";
     "period" => ("dot", 0xBE), alias "." | "dot";
     "slash" => ("slash", 0xBF), alias "/";
+    "hangul" => ("lang1", 0x15), alias "hanyeong" | "han_yeong";
+    "hanja" => ("lang2", 0x19);
 }
 
 pub fn lookup(name: &str) -> Option<Key> {
@@ -244,6 +246,7 @@ mod tests {
         assert_eq!(Chord::parse("alt+f4").unwrap().qcodes(), vec!["alt", "f4"]);
         assert_eq!(Chord::parse("win").unwrap().qcodes(), vec!["meta_l"]);
         assert_eq!(Chord::parse("ctrl+alt+delete").unwrap().qcodes(), vec!["ctrl", "alt", "delete"]);
+        assert_eq!(Chord::parse("hangul").unwrap().qcodes(), vec!["lang1"]);
     }
 
     #[test]

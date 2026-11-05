@@ -49,6 +49,11 @@ impl MachinePaths {
     pub fn qmp_socket(&self) -> PathBuf {
         self.runtime.join("qmp.sock")
     }
+    /// Second QMP monitor reserved for the interactive viewer, so `action`/MCP
+    /// (which use `qmp.sock`) keep working while a viewer is open.
+    pub fn qmp_view_socket(&self) -> PathBuf {
+        self.runtime.join("qmpv.sock")
+    }
     pub fn vnc_socket(&self) -> PathBuf {
         self.runtime.join("vnc.sock")
     }
@@ -327,7 +332,7 @@ mod tests {
         let store = Store::new(long_root);
         let name = VmName::parse(&"n".repeat(48)).unwrap();
         let paths = store.paths(&name);
-        for socket in [paths.qmp_socket(), paths.vnc_socket(), paths.agent_socket(), paths.swtpm_socket()] {
+        for socket in [paths.qmp_socket(), paths.qmp_view_socket(), paths.vnc_socket(), paths.agent_socket(), paths.swtpm_socket()] {
             assert!(socket.as_os_str().len() <= 104, "{} is too long", socket.display());
         }
         assert_eq!(store.paths(&name).runtime, paths.runtime, "runtime dir is stable");
