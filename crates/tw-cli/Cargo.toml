@@ -31,3 +31,8 @@ tw-renderer.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# The native window viewer exists on macOS and Windows only.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+winit = "0.30"
+softbuffer = "0.4"

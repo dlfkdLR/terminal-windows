@@ -17,6 +17,140 @@ use tw_core::{ErrorCode, TwError, TwResult, VmName};
 use tw_media::cache;
 use tw_qemu::{detect, firmware};
 
+/// What the host offers, used for defaults and limits.
+#[derive(Debug, Clone, Copy)]
+pub struct HostResources {
+    pub cpus: u32,
+    pub memory_gib: Option<u64>,
+}
+
+/// Resources and network mode of a new VM.
+#[derive(Debug, Clone)]
+pub struct VmSettings {
+    pub name: VmName,
+    pub cpus: u32,
+    pub memory_gib: u64,
+    pub disk_gib: u64,
+    pub network: NetworkMode,
+}
+
+impl VmSettings {
+    pub fn summary(&self) -> String {
+        let net = match self.network {
+            NetworkMode::Nat => "NAT network",
+            NetworkMode::Offline => "no network",
+        };
+        format!("{} CPUs, {} GiB RAM, {} GiB disk (grows as used), {net}", self.cpus, self.memory_gib, self.disk_gib)
+    }
+}
+
+/// Inclusive limits for each setting on this host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub cpus: (u32, u32),
+    pub memory_gib: (u64, u64),
+    pub disk_gib: (u64, u64),
+}
+
+pub const MIN_CPUS: u32 = tw_core::model::win11::MIN_CPUS;
+pub const MIN_MEMORY_GIB: u64 = tw_core::model::win11::MIN_MEMORY_MIB / 1024;
+pub const MIN_DISK_GIB: u64 = tw_core::model::win11::MIN_DISK_GIB;
+/// Memory kept for the host when the host's RAM is known.
+const HOST_RESERVE_GIB: u64 = 4;
+
+pub fn limits(res: &HostResources) -> TwResult<Limits> {
+    let max_memory = match res.memory_gib {
+        Some(total) if total >= MIN_MEMORY_GIB + HOST_RESERVE_GIB => (total - HOST_RESERVE_GIB).min(128),
+        Some(total) => {
+            return Err(TwError::new(
+                ErrorCode::Incompatible,
+                format!("this computer has {total} GiB of RAM; Windows 11 needs {MIN_MEMORY_GIB} GiB for the VM plus memory for the host"),
+            ))
+        }
+        None => 64,
+    };
+    Ok(Limits { cpus: (MIN_CPUS, res.cpus.max(MIN_CPUS)), memory_gib: (MIN_MEMORY_GIB, max_memory), disk_gib: (MIN_DISK_GIB, 2048) })
+}
+
+/// The automatic choice: half of the CPUs (2-8), 8 GiB of RAM on machines with 16 GiB or more
+/// (otherwise the 4 GiB minimum), an 80 GiB sparse disk. Explicit command-line values win.
+pub fn auto_settings(res: &HostResources, name: VmName, opts: &UpOptions) -> TwResult<VmSettings> {
+    let lim = limits(res)?;
+    let cpus = opts.cpus.unwrap_or_else(|| (res.cpus / 2).clamp(MIN_CPUS, 8)).clamp(lim.cpus.0, lim.cpus.1.max(opts.cpus.unwrap_or(0)));
+    let memory = opts.memory_gib.unwrap_or(match res.memory_gib {
+        Some(total) if total < 16 => MIN_MEMORY_GIB,
+        _ => 8,
+    });
+    let memory_gib = memory.min(lim.memory_gib.1.max(opts.memory_gib.unwrap_or(0)));
+    Ok(VmSettings { name, cpus, memory_gib, disk_gib: opts.disk_gib.unwrap_or(80), network: NetworkMode::Nat })
+}
+
+/// Best-effort host RAM in GiB.
+pub fn host_memory_gib() -> Option<u64> {
+    let bytes: Option<u64> = if cfg!(target_os = "macos") {
+        let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    } else if cfg!(target_os = "linux") {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let kb: u64 = meminfo.lines().find_map(|l| l.strip_prefix("MemTotal:"))?.trim().trim_end_matches("kB").trim().parse().ok()?;
+        Some(kb * 1024)
+    } else {
+        None
+    };
+    bytes.map(|b| b >> 30)
+}
+
+pub fn host_resources() -> HostResources {
+    HostResources { cpus: std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2), memory_gib: host_memory_gib() }
+}
+
+/// The "custom" questionnaire. `taken` says whether a VM name is already used.
+pub fn ask_settings<R: std::io::BufRead, W: std::io::Write>(
+    p: &mut super::prompt::Prompter<R, W>,
+    requested_name: Option<&VmName>,
+    res: &HostResources,
+    defaults: &VmSettings,
+    taken: &dyn Fn(&VmName) -> bool,
+) -> TwResult<VmSettings> {
+    let io = |e: std::io::Error| TwError::new(ErrorCode::InvalidInput, e.to_string());
+    let lim = limits(res)?;
+    let ram = res.memory_gib.map(|m| format!("{m} GiB RAM")).unwrap_or_else(|| "RAM unknown".into());
+    p.say(&format!(
+        "This computer: {} CPUs, {ram}. Windows 11 needs at least {MIN_CPUS} CPUs, {MIN_MEMORY_GIB} GiB RAM and {MIN_DISK_GIB} GiB disk.",
+        res.cpus
+    ))
+    .map_err(io)?;
+    let name = match requested_name {
+        Some(n) => n.clone(),
+        None => {
+            let text = p
+                .text("VM name", defaults.name.as_str(), |v| {
+                    let parsed = VmName::parse(v).map_err(|e| e.message)?;
+                    if taken(&parsed) {
+                        Err(format!("a VM named '{v}' already exists"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(io)?;
+            VmName::parse(&text)?
+        }
+    };
+    let cpus = p.number("CPUs", u64::from(defaults.cpus), u64::from(lim.cpus.0), u64::from(lim.cpus.1), "CPUs").map_err(io)? as u32;
+    let memory_gib = p.number("Memory", defaults.memory_gib, lim.memory_gib.0, lim.memory_gib.1, "GiB").map_err(io)?;
+    let disk_gib = p
+        .number("Disk size (sparse: only space actually used is taken)", defaults.disk_gib, lim.disk_gib.0, lim.disk_gib.1, "GiB")
+        .map_err(io)?;
+    let network = match p
+        .choose("Network", &["NAT: the VM uses this computer's internet connection (recommended)", "Offline: no network device"], 0)
+        .map_err(io)?
+    {
+        1 => NetworkMode::Offline,
+        _ => NetworkMode::Nat,
+    };
+    Ok(VmSettings { name, cpus, memory_gib, disk_gib, network })
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct UpOptions {
     pub name: Option<VmName>,
@@ -29,6 +163,10 @@ pub struct UpOptions {
     pub cpus: Option<u32>,
     pub memory_gib: Option<u64>,
     pub disk_gib: Option<u64>,
+    /// Always ask for the settings of a new VM.
+    pub custom: bool,
+    /// Never ask: use the automatic settings.
+    pub auto: bool,
 }
 
 /// Language for the Windows image, from the system locale (Microsoft's spelling).
@@ -109,7 +247,7 @@ pub async fn run(
     out: &Output,
 ) -> TwResult<()> {
     let arch = host.native_guest_arch()?;
-    let name = resolve_default_name(store, opts.name.clone())?;
+    let mut name = resolve_default_name(store, opts.name.clone())?;
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
     // What is missing right now (no side effects).
@@ -123,13 +261,35 @@ pub async fn run(
     let need_image = !exists && opts.iso.is_none() && cache::find(&cache::images_dir(store.root()), arch, None).is_none();
     let state = if exists { Some(service.status(&name).await?.state) } else { None };
     let need_start = state != Some(VmState::Running) && state != Some(VmState::Paused);
-    let mut open_viewer = !opts.no_view && !opts.detach && interactive;
-    if open_viewer {
-        if let Some(terminal) = super::view::known_unsupported_terminal() {
-            // Still do the whole setup; only the final viewer step is skipped.
-            eprintln!("note: {terminal} cannot show the viewer, so setup will stop before opening it.");
-            open_viewer = false;
-        }
+    let open_viewer = !opts.no_view && !opts.detach && interactive;
+
+    // Settings of a new VM, decided before any long step so the user can walk away afterwards.
+    let resources = host_resources();
+    let mut settings: Option<VmSettings> = None;
+    if !exists {
+        let auto = auto_settings(&resources, name.clone(), &opts)?;
+        let explicit = opts.cpus.is_some() || opts.memory_gib.is_some() || opts.disk_gib.is_some();
+        let may_ask = interactive && !opts.plan && !opts.auto && !explicit;
+        settings = Some(if may_ask {
+            let mut prompter = super::prompt::Prompter::new(std::io::stdin().lock(), std::io::stderr());
+            let io = |e: std::io::Error| TwError::new(ErrorCode::InvalidInput, e.to_string());
+            let custom = opts.custom || {
+                prompter.say(&format!("No VM named '{name}' yet.")).map_err(io)?;
+                let options =
+                    [format!("Automatic (recommended): {}", auto.summary()), "Custom: choose CPUs, memory, disk and network".to_string()];
+                let refs: Vec<&str> = options.iter().map(String::as_str).collect();
+                prompter.choose("How should the VM be created?", &refs, 0).map_err(io)? == 1
+            };
+            if custom {
+                let chosen = ask_settings(&mut prompter, opts.name.as_ref(), &resources, &auto, &|n| store.exists(n))?;
+                name = chosen.name.clone();
+                chosen
+            } else {
+                auto
+            }
+        } else {
+            auto
+        });
     }
 
     let mut steps: Vec<(&str, String)> = Vec::new();
@@ -143,7 +303,8 @@ pub async fn run(
         steps.push(("get-windows-image", format!("download Windows 11 ({language}) from Microsoft and verify its SHA-256")));
     }
     if !exists {
-        steps.push(("create-vm", format!("create VM '{name}'")));
+        let detail = settings.as_ref().map(|s| format!(": {}", s.summary())).unwrap_or_default();
+        steps.push(("create-vm", format!("create VM '{name}'{detail}")));
     }
     if need_start {
         steps.push(("start-vm", format!("boot VM '{name}'")));
@@ -224,21 +385,21 @@ pub async fn run(
                 }
             }
         };
-        next(&format!("Creating VM '{name}'"));
+        let chosen = settings.clone().ok_or_else(|| TwError::new(ErrorCode::Internal, "settings were not decided"))?;
+        next(&format!("Creating VM '{name}': {}", chosen.summary()));
         let request = NewMachine {
             name: name.clone(),
             backend: BackendKind::Qemu,
             arch,
-            cpus: opts.cpus,
-            memory_mib: opts.memory_gib.map(|g| g.saturating_mul(1024)),
-            disk_gib: opts.disk_gib,
+            cpus: Some(chosen.cpus),
+            memory_mib: Some(chosen.memory_gib.saturating_mul(1024)),
+            disk_gib: Some(chosen.disk_gib),
             display: None,
-            network: NetworkMode::Nat,
+            network: chosen.network,
             install_iso: Some(iso),
             drivers_iso: None,
         };
-        let host_cpus = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2);
-        service.create(request, host_cpus, super::now_rfc3339()).await?;
+        service.create(request, resources.cpus, super::now_rfc3339()).await?;
         created = true;
     }
 
@@ -273,11 +434,7 @@ pub async fn run(
         };
     }
     out.emit(json!({ "vm": name, "state": status.state, "next": format!("terminal-windows view {name}") }), |_| {
-        let mut text = format!("VM '{name}' is {:?}. Watch and control it with: terminal-windows view {name}", status.state);
-        if let Some(terminal) = super::view::known_unsupported_terminal() {
-            text.push_str(&format!("\n{}", super::view::unsupported_terminal_error(terminal)));
-        }
-        text
+        format!("VM '{name}' is {:?}. Watch and control it with: terminal-windows view {name}", status.state)
     });
     Ok(())
 }
@@ -336,6 +493,74 @@ mod tests {
             rgb[i..i + 3].copy_from_slice(&[255, 255, 255]);
         }
         tw_core::control::RawFrame { width: width as u32, height: height as u32, rgb }
+    }
+
+    fn res(cpus: u32, mem: Option<u64>) -> HostResources {
+        HostResources { cpus, memory_gib: mem }
+    }
+
+    fn opts() -> UpOptions {
+        UpOptions::default()
+    }
+
+    #[test]
+    fn automatic_settings_scale_with_the_host() {
+        let name = || VmName::parse("default").unwrap();
+        let s = auto_settings(&res(10, Some(32)), name(), &opts()).unwrap();
+        assert_eq!((s.cpus, s.memory_gib, s.disk_gib), (5, 8, 80));
+        let s = auto_settings(&res(16, Some(64)), name(), &opts()).unwrap();
+        assert_eq!(s.cpus, 8, "capped at 8");
+        let s = auto_settings(&res(4, Some(8)), name(), &opts()).unwrap();
+        assert_eq!((s.cpus, s.memory_gib), (2, 4), "a small host gets the Windows 11 minimum");
+        let s = auto_settings(&res(8, None), name(), &opts()).unwrap();
+        assert_eq!(s.memory_gib, 8, "unknown RAM keeps the default");
+        let s = auto_settings(&res(8, Some(32)), name(), &UpOptions { memory_gib: Some(12), disk_gib: Some(120), cpus: Some(6), ..opts() })
+            .unwrap();
+        assert_eq!((s.cpus, s.memory_gib, s.disk_gib), (6, 12, 120), "explicit values win");
+        assert!(auto_settings(&res(8, Some(6)), name(), &opts()).is_err(), "6 GiB host cannot run Windows 11 plus itself");
+    }
+
+    #[test]
+    fn limits_leave_memory_for_the_host() {
+        let l = limits(&res(10, Some(16))).unwrap();
+        assert_eq!(l, Limits { cpus: (2, 10), memory_gib: (4, 12), disk_gib: (64, 2048) });
+        assert_eq!(limits(&res(1, Some(64))).unwrap().cpus, (2, 2), "never below the Windows 11 minimum");
+        assert_eq!(limits(&res(8, Some(512))).unwrap().memory_gib.1, 128);
+    }
+
+    #[test]
+    fn custom_questionnaire_collects_every_setting() {
+        let r = res(10, Some(32));
+        let defaults = auto_settings(&r, VmName::parse("default").unwrap(), &opts()).unwrap();
+        // name (taken first, then fine), cpus, memory, disk, network = offline
+        let script = "win11\nwork\n6\n12 GiB\n200\n2\n";
+        let mut p = super::super::prompt::Prompter::new(script.as_bytes(), Vec::new());
+        let taken = |n: &VmName| n.as_str() == "win11";
+        let got = ask_settings(&mut p, None, &r, &defaults, &taken).unwrap();
+        assert_eq!(got.name.as_str(), "work");
+        assert_eq!((got.cpus, got.memory_gib, got.disk_gib), (6, 12, 200));
+        assert_eq!(got.network, NetworkMode::Offline);
+        assert!(got.summary().contains("no network"));
+    }
+
+    #[test]
+    fn custom_questionnaire_accepts_defaults_and_a_given_name() {
+        let r = res(10, Some(32));
+        let given = VmName::parse("lab").unwrap();
+        let defaults = auto_settings(&r, given.clone(), &opts()).unwrap();
+        let mut p = super::super::prompt::Prompter::new("\n\n\n\n".as_bytes(), Vec::new());
+        let got = ask_settings(&mut p, Some(&given), &r, &defaults, &|_| false).unwrap();
+        assert_eq!((got.name.as_str(), got.cpus, got.memory_gib, got.disk_gib, got.network), ("lab", 5, 8, 80, NetworkMode::Nat));
+    }
+
+    #[test]
+    fn custom_questionnaire_rejects_values_outside_the_limits() {
+        let r = res(10, Some(16));
+        let defaults = auto_settings(&r, VmName::parse("default").unwrap(), &opts()).unwrap();
+        // cpus: default; memory 2 (below 4), 64 (above 12), then 6; disk 10 (below 64), then 100; network: default
+        let mut p = super::super::prompt::Prompter::new("\n2\n64\n6\n10\n100\n\n".as_bytes(), Vec::new());
+        let got = ask_settings(&mut p, Some(&VmName::parse("d").unwrap()), &r, &defaults, &|_| false).unwrap();
+        assert_eq!((got.memory_gib, got.disk_gib), (6, 100));
     }
 
     #[test]

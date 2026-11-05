@@ -177,6 +177,33 @@ pub fn unsupported_terminal_error(what: &str) -> TwError {
         .with_hint(format!("{hint} Without a graphics terminal you can still use `terminal-windows action NAME screenshot`."))
 }
 
+/// Opens the native window viewer (the fallback for terminals without graphics).
+pub async fn open_window(service: &VmService, name: &VmName, out: &super::Output) -> TwResult<()> {
+    let shown = super::window_ctl::show(service, name).await?;
+    out.emit(serde_json::json!({ "name": name, "pid": shown.pid, "already_open": shown.already_open }), |_| {
+        if shown.already_open {
+            format!("The viewer window for '{name}' is already open.")
+        } else {
+            format!("Opened a window for '{name}'. Close it to leave; the VM keeps running. (terminal-windows hide {name} closes it from here.)")
+        }
+    });
+    Ok(())
+}
+
+/// A terminal that cannot show graphics gets the native window instead, like terminal-mac.
+async fn fall_back_to_window(service: &VmService, name: &VmName, why: TwError) -> TwResult<()> {
+    eprintln!(
+        "{} cannot show the desktop inside it, so a native window is used instead.",
+        why.message.split(" cannot show").next().unwrap_or("This terminal")
+    );
+    eprintln!("(Ghostty, Kitty and WezTerm show the desktop right in the terminal.)");
+    match open_window(service, name, &super::Output { json: false }).await {
+        // No native window on this platform: the original explanation is the useful one.
+        Err(e) if e.code == ErrorCode::Unsupported => Err(why),
+        other => other,
+    }
+}
+
 /// Asks the terminal what it supports. Environment variables are not trusted.
 async fn probe(stdin: &mut mpsc::Receiver<Vec<u8>>, filter: &mut MetricFilter) -> TwResult<Transport> {
     let probe_file = temp_path("probe", 0);
@@ -234,15 +261,23 @@ pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
     }
     if let Some(terminal) = known_unsupported_terminal() {
         // Do not even probe: these terminals would print the query as text.
-        return Err(unsupported_terminal_error(terminal));
+        return fall_back_to_window(service, name, unsupported_terminal_error(terminal)).await;
     }
     let console: Arc<dyn InteractiveConsole> = Arc::from(service.interactive_console(name).await?);
     let first = console.frame().await?;
 
-    let _guard = TerminalGuard::enter()?;
+    let guard = TerminalGuard::enter()?;
     let mut stdin = spawn_stdin_reader();
     let mut filter = MetricFilter::new();
-    let transport = probe(&mut stdin, &mut filter).await?;
+    let transport = match probe(&mut stdin, &mut filter).await {
+        Ok(t) => t,
+        Err(e) if e.code == ErrorCode::Unsupported => {
+            drop(guard); // leave raw mode before printing
+            return fall_back_to_window(service, name, e).await;
+        }
+        Err(e) => return Err(e),
+    };
+    let _guard = guard;
     write_out("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[?1002h\x1b[?1006h");
 
     let (status_tx, mut status_rx) = mpsc::channel::<String>(16);

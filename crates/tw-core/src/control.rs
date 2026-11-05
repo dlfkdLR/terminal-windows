@@ -81,6 +81,8 @@ pub trait InteractiveConsole: ComputerControl {
     async fn button(&self, button: MouseButton, down: bool) -> TwResult<()>;
     /// One wheel notch; `up` scrolls content up.
     async fn wheel(&self, up: bool) -> TwResult<()>;
+    /// A single key press or release by QEMU qcode (physical key), for held keys and modifiers.
+    async fn key_event(&self, qcode: &str, down: bool) -> TwResult<()>;
 }
 
 /// Shared argument validation so every plane rejects the same inputs.

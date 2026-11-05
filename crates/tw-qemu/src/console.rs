@@ -250,6 +250,13 @@ impl<S: AsyncRead + AsyncWrite + Send + 'static> InteractiveConsole for QmpConso
         let name = if up { "wheel-up" } else { "wheel-down" };
         self.send(vec![input::btn(name, true), input::btn(name, false)]).await
     }
+
+    async fn key_event(&self, qcode: &str, down: bool) -> TwResult<()> {
+        if qcode.is_empty() || qcode.len() > 20 || !qcode.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+            return Err(TwError::invalid(format!("invalid key code {qcode:?}")));
+        }
+        self.send(vec![input::key(qcode, down)]).await
+    }
 }
 
 #[cfg(test)]
@@ -338,6 +345,22 @@ mod tests {
         let downs = inputs(&log).iter().filter(|e| e["data"]["button"] == "wheel-down" && e["data"]["down"] == true).count();
         assert_eq!(downs, 3);
         assert!(c.scroll(5, 5, 0, 0).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn single_key_events_and_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (c, log) = console(dir.path(), 10, 10).await;
+        c.key_event("shift_r", true).await.unwrap();
+        c.key_event("shift_r", false).await.unwrap();
+        let seq: Vec<(String, bool)> = inputs(&log)
+            .iter()
+            .map(|e| (e["data"]["key"]["data"].as_str().unwrap().to_string(), e["data"]["down"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(seq, vec![("shift_r".to_string(), true), ("shift_r".to_string(), false)]);
+        for bad in ["", "Shift", "a b", "x\"y", &"a".repeat(21)] {
+            assert!(c.key_event(bad, true).await.is_err(), "{bad:?}");
+        }
     }
 
     #[tokio::test]

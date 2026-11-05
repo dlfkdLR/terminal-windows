@@ -14,9 +14,14 @@ use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
 mod firmware_cmd;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod geometry;
 mod media;
+mod prompt;
 mod up;
 mod view;
+mod window;
+mod window_ctl;
 
 #[derive(Parser, Debug)]
 #[command(name = "terminal-windows", version, about = "Run and control Windows virtual machines from a terminal")]
@@ -97,17 +102,21 @@ enum Command {
     /// List VMs.
     #[command(alias = "list")]
     Ls,
-    /// View and control the desktop inside the terminal (Kitty graphics: Ghostty, Kitty, WezTerm).
+    /// View and control the desktop. Inside the terminal with Kitty graphics (Ghostty, Kitty, WezTerm);
+    /// any other terminal gets the native window instead.
     View {
         #[arg(default_value = "default")]
         name: VmName,
+        /// Always use the native window, even in a terminal that can show graphics.
+        #[arg(long)]
+        window: bool,
     },
-    /// Open a native viewer window (not implemented yet).
+    /// Open the native viewer window (macOS and Windows). Works in any terminal.
     Show {
         #[arg(default_value = "default")]
         name: VmName,
     },
-    /// Close the native viewer window (not implemented yet).
+    /// Close the native viewer window. The VM keeps running.
     Hide {
         #[arg(default_value = "default")]
         name: VmName,
@@ -139,6 +148,9 @@ enum Command {
         #[command(subcommand)]
         command: FirmwareCommand,
     },
+    /// Internal: the native viewer window process started by `show`.
+    #[command(hide = true)]
+    Window { name: VmName },
     /// Run the MCP server on stdio for agents (Claude Code, Codex, Cursor, ...).
     Mcp {
         #[arg(default_value = "default")]
@@ -178,6 +190,12 @@ enum Command {
         /// Disk size in GiB for a new VM.
         #[arg(long)]
         disk: Option<u64>,
+        /// Ask for the settings of a new VM (CPUs, memory, disk, network).
+        #[arg(long, conflicts_with = "auto")]
+        custom: bool,
+        /// Use the automatic settings without asking.
+        #[arg(long)]
+        auto: bool,
     },
     /// Computer-use actions on a running VM.
     Action {
@@ -303,11 +321,6 @@ fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
 }
 
-fn not_implemented(what: &str, phase: &str) -> TwError {
-    TwError::unsupported(format!("`{what}` is not implemented yet ({phase} in docs/PLAN.md)"))
-        .with_hint("Use `terminal-windows action NAME screenshot` and the MCP server meanwhile.")
-}
-
 struct Output {
     json: bool,
 }
@@ -366,6 +379,8 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             cpus: None,
             memory: None,
             disk: None,
+            custom: false,
+            auto: false,
         },
         None => {
             use clap::CommandFactory;
@@ -380,9 +395,10 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
     | Command::Pause { name }
     | Command::Resume { name }
     | Command::Status { name }
-    | Command::View { name }
+    | Command::View { name, .. }
     | Command::Show { name }
     | Command::Hide { name }
+    | Command::Window { name }
     | Command::Logs { name, .. }
     | Command::Config { name, .. }
     | Command::Mcp { name, .. } = &mut command
@@ -510,10 +526,28 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                     .join("\n")
             });
         }
-        Command::View { name } => view::run(&service, &name).await?,
-        Command::Show { .. } | Command::Hide { .. } => return Err(not_implemented("show/hide", "P5")),
-        Command::Up { name, iso, language, no_view, detach, plan, yes, cpus, memory, disk } => {
-            let options = up::UpOptions { name, iso, language, no_view, detach, plan, yes, cpus, memory_gib: memory, disk_gib: disk };
+        Command::View { name, window } => {
+            if window {
+                view::open_window(&service, &name, out).await?
+            } else {
+                view::run(&service, &name).await?
+            }
+        }
+        Command::Show { name } => view::open_window(&service, &name, out).await?,
+        Command::Hide { name } => {
+            let closed = window_ctl::hide(&service, &name)?;
+            out.emit(json!({ "name": name, "closed": closed }), |_| {
+                if closed {
+                    format!("Closed the viewer window of '{name}'.")
+                } else {
+                    format!("No viewer window is open for '{name}'.")
+                }
+            });
+        }
+        Command::Window { name } => window_ctl::run_window(&service, &name).await?,
+        Command::Up { name, iso, language, no_view, detach, plan, yes, cpus, memory, disk, custom, auto } => {
+            let options =
+                up::UpOptions { name, iso, language, no_view, detach, plan, yes, cpus, memory_gib: memory, disk_gib: disk, custom, auto };
             up::run(options, &store, &service, &backend, host, out).await?
         }
         Command::Delete { name, force } => {
@@ -659,6 +693,8 @@ mod tests {
             vec!["terminal-windows"],
             vec!["terminal-windows", "up"],
             vec!["terminal-windows", "up", "--plan", "--yes", "--language", "Korean", "work"],
+            vec!["terminal-windows", "up", "--custom"],
+            vec!["terminal-windows", "up", "--auto", "--memory", "12", "--disk", "120", "--cpus", "6"],
             vec!["terminal-windows", "start"],
             vec!["terminal-windows", "view"],
             vec!["terminal-windows", "doctor"],
@@ -682,6 +718,11 @@ mod tests {
         ] {
             Cli::try_parse_from(&args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn custom_and_auto_conflict() {
+        assert!(Cli::try_parse_from(["terminal-windows", "up", "--custom", "--auto"]).is_err());
     }
 
     #[test]
