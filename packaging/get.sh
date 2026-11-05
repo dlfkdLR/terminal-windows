@@ -38,8 +38,8 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 say "Downloading $asset ..."
-curl -fsSL "$base/$asset" -o "$tmp/$asset" || die "download failed: $base/$asset"
-curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || die "cannot download SHA256SUMS"
+curl -fsSL --retry 5 --retry-delay 3 "$base/$asset" -o "$tmp/$asset" || die "download failed: $base/$asset"
+curl -fsSL --retry 5 --retry-delay 3 "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || die "cannot download SHA256SUMS"
 
 expected="$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$tmp/SHA256SUMS")"
 [ -n "$expected" ] || die "$asset is not listed in SHA256SUMS"
