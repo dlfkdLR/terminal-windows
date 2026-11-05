@@ -18,6 +18,7 @@ terminal-windows is **not a hardened malware sandbox.** It will not be described
 - No network listeners: QMP, VNC and the agent channel use Unix sockets (directory 0700; owner, mode and symlink checks) or Windows named pipes. Only VNC on Windows hosts is an exception that uses `127.0.0.1` with a QEMU VNC password; it is documented that **other local users on the same host can see the port.**
 - Storage: directories 0700; `machine.toml`, `agent.key` and `efivars.fd` 0600; atomic writes. On Windows the inherited ACL of `%LOCALAPPDATA%`.
 - The viewer's frame files (raw guest screen contents) are written 0600 and removed when the viewer exits.
+- The native window runs as its own process; `hide` only terminates a process whose command line is `terminal-windows window ...` (a recycled PID is never killed). Its log (`viewer.log`) stays empty unless `TW_WINDOW_DEBUG` is set, which logs forwarded input events, including keys.
 - No host command is executed from guest data. QEMU, swtpm and qemu-img arguments come only from validated configuration and host-chosen paths (`tw-qemu::cmdline`; no shell; QEMU option commas escaped; swtpm rejects paths containing commas).
 - Resource bounds: frame size, 32 KiB of text, scroll within ±10000, 1 MiB per QMP line, 64 buffered QMP events, 4 MiB per MCP message, 64 queued viewer inputs.
 - Logs never contain guest strings, keys or passwords.

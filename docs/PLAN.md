@@ -62,11 +62,11 @@ Desktop Duplication / Windows Graphics Capture and `SendInput` only work on an *
 - The ground truth for screenshots is Plane H. Data reported by Plane G is marked `source: guest-reported` (malware inside the guest could impersonate the agent).
 - MCP policy: when the guest is on the secure desktop or lock screen, agent tools **refuse to act and tell the agent to hand over to the user** by default. Plane H is used only if the VM owner explicitly opts in with `--allow-console-input` (planned).
 
-### 2.4 🔴 QEMU cannot show or hide its native window at runtime
+### 2.4 🔴 QEMU cannot show or hide its native window at runtime (resolved with our own window)
 
 Upstream's `show`/`hide` hide a VZ window with `orderOut`. QEMU's `-display cocoa/gtk/sdl` window cannot be hidden and re-shown at runtime.
 
-**Change:** the VM **always runs headless** (`-display none`) and the screen is exported only through QMP (and VNC on a local Unix socket). `show` is redefined as "start a native viewer process" and `hide` as "stop it". VM lifetime and window lifetime become independent, which is actually more robust.
+**Change:** the VM **always runs headless** (`-display none`) and the screen is exported only through QMP (and VNC on a local Unix socket). `show` is redefined as "start a native viewer process" and `hide` as "stop it". The process is our own window (winit and softbuffer, macOS and Windows) reading frames over a second QMP monitor, which is also the automatic fallback of `view` in terminals without graphics. VM lifetime and window lifetime become independent, which is actually more robust.
 
 ### 2.5 🟠 Terminals on Windows hosts do not support the Kitty graphics protocol
 
@@ -223,7 +223,7 @@ Each phase must meet its **exit criteria** and record the evidence (command, out
 | P3a | Protocol v1 and transport | Handshake, HMAC, replay protection and size limits tested (done); virtio-serial measured | 🟡 Protocol done, measurement pending |
 | P3b | Hyper-V backend (Windows host) | Create a Gen2 + vTPM VM, connect over hvsocket | ⏳ Needs a Windows machine |
 | P4 | Windows agent | After sign-in, `action type` of a Unicode sentence appears in Notepad | 🟡 Pure logic done; Win32 code compiles in CI (Windows x64 and ARM64); not run in a VM |
-| P5 | Terminal viewer | Verified in Kitty, Ghostty, WezTerm and Windows Terminal (Sixel), including resize and recovery | 🟡 Viewer implemented and verified in a pseudo-terminal; real emulators pending; Sixel not implemented |
+| P5 | Terminal viewer | Verified in Kitty, Ghostty, WezTerm and Windows Terminal (Sixel), including resize and recovery | 🟡 In-terminal viewer verified in a pseudo-terminal; native window viewer (macOS, Windows) implemented and observed on macOS; real Ghostty/Kitty/WezTerm and Sixel pending |
 | P6 | MCP | An observe, act, verify loop measured with Claude Code or Codex | 🟡 Server and schemas done; driven against a real VM over stdio; real clients pending |
 | P7 | Cross-platform validation | The 8-stage matrix in compatibility.md | ⏳ |
 | P8 | Snapshots (qcow2 internal / Hyper-V checkpoints), templates, updates, release automation | Only after P2c, P4 and P6 | ⛔ (release automation already exists) |
@@ -265,7 +265,7 @@ Implemented and verified by tests, versus not yet measured:
 - `tw-renderer`: upstream layout and metric filter ported, Kitty encoder (temporary-file and PNG transports), terminal detection.
 - `tw-media`: Microsoft download page and API client, resumable download, SHA-256 verification, ISO cache, Downloads watcher.
 - `tw-mcp`: MCP stdio server (initialisation, version negotiation, tool schemas, tool execution).
-- `tw-cli`: `up`, `doctor`, `image`, `firmware`, `create`, `start`, `stop`, `pause`, `resume`, `status`, `ls`, `view`, `delete`, `logs`, `config`, `action ...`, `mcp`. `show` and `hide` return an explicit "not implemented" error. `up` (also a bare `terminal-windows` in a terminal) runs the guided flow.
+- `tw-cli`: `up`, `doctor`, `image`, `firmware`, `create`, `start`, `stop`, `pause`, `resume`, `status`, `ls`, `view`, `delete`, `logs`, `config`, `action ...`, `mcp`. `show` and `hide` open and close the native window viewer. `up` (also a bare `terminal-windows` in a terminal) runs the guided flow.
 - `guest/windows-agent`: request dispatcher, coordinate normalisation, UTF-16 chunking and other platform-independent logic with tests; the Win32 implementation compiles in CI for x64 and ARM64.
 
 **Measured (2026-11-05):** Apple Silicon with QEMU 11.1.3 and HVF: firmware boot, QMP screenshots, keyboard and mouse input, pause/resume, forced stop, restart, delete, MCP calls against a real VM, the Windows 11 ARM64 Setup passing its Secure Boot and TPM requirement checks, and an official ISO downloaded and verified. Details in compatibility.md.

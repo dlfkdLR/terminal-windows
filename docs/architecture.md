@@ -11,7 +11,7 @@
 | `tw-renderer` | Layout, terminal reply filter, Kitty encoder, terminal capability decision | none |
 | `tw-media` | Microsoft download page and API client, resumable download, SHA-256 verification, ISO cache, Downloads watcher | core |
 | `tw-mcp` | MCP stdio server (`Target` trait, implemented for `VmService`) | core |
-| `tw-cli` | The `terminal-windows` binary: commands, viewer, image and firmware management | all of the above |
+| `tw-cli` | The `terminal-windows` binary: commands, guided `up` flow with settings questionnaire, terminal viewer, native window viewer (macOS and Windows), image and firmware management | all of the above |
 | `tw-agent` (`guest/windows-agent`) | Windows guest agent | core, input, protocol |
 
 The original prompt's `tw-transport` and `tw-security` gained too little as separate crates and were folded into `tw-protocol` and `tw-core::secure`. `tw-hyperv` will be added when its code exists (no empty crates).

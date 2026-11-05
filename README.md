@@ -48,8 +48,17 @@ In a terminal, running `terminal-windows` with no command does everything that i
 1. installs QEMU and swtpm with Homebrew (asks first; `--yes` skips the question),
 2. installs the Secure Boot firmware (Apple Silicon),
 3. downloads Windows 11 from Microsoft in your system language and verifies its SHA-256 (the final download click happens in your browser, see below),
-4. creates and boots the VM, pressing the "boot from CD" key at the right moment,
-5. opens the viewer (Ctrl+] leaves it; the VM keeps running).
+4. asks how to create the VM (see below), then creates and boots it, pressing the "boot from CD" key at the right moment,
+5. opens the viewer: inside the terminal where that works, otherwise in a native window (Ctrl+] or closing the window leaves it; the VM keeps running).
+
+### Automatic or custom VM
+
+When a new VM is about to be created in a terminal, you choose:
+
+1. **Automatic (recommended):** half of your CPUs (2 to 8), 8 GiB of RAM (4 GiB on computers with less than 16 GiB), an 80 GiB disk, NAT network.
+2. **Custom:** you set the name, CPUs, memory, disk size and network (NAT or offline). The limits are shown and enforced: at least 2 CPUs, 4 GiB RAM and 64 GiB disk (Windows 11's minimums), memory at most your RAM minus 4 GiB, disk at most 2048 GiB. The disk is sparse: it only takes the space the guest actually uses.
+
+`--custom` always asks, `--auto` never asks, and `--cpus`, `--memory` (GiB) and `--disk` (GiB) set values directly (no questions). Without a terminal (scripts) the automatic settings are used.
 
 Run it again later and it just reconnects. `terminal-windows up --plan` shows the steps without doing anything; `--no-view` boots without opening the viewer; `--iso PATH`, `--language`, `--cpus`, `--memory`, `--disk` customise a new VM. Commands that take a VM name (`start`, `view`, `status`, ...) default to `default`, or to the only VM if there is just one.
 
@@ -75,7 +84,12 @@ $B delete dev                               # asks for confirmation (--force ski
 
 ### Which terminal?
 
-The viewer needs a terminal with Kitty graphics support: **Ghostty, Kitty or WezTerm** (on macOS: `brew install --cask ghostty`). Apple Terminal and the VS Code / Cursor terminal cannot show images; there, `terminal-windows` still sets up and boots the VM, tells you to open a supported terminal, and `terminal-windows action NAME screenshot` keeps working. tmux and screen block graphics.
+`terminal-windows view` works in **any** terminal, like terminal-mac:
+
+- **Ghostty, Kitty, WezTerm** (Kitty graphics): the desktop is drawn inside the terminal.
+- **Any other terminal** (Apple Terminal, VS Code or Cursor terminal, tmux, ...): a native window opens instead (macOS and Windows). `terminal-windows show` opens it directly, `terminal-windows hide` closes it, and `view --window` forces it. Closing the window never stops the VM.
+
+The native window forwards the mouse and the keyboard as a physical keyboard, so the guest's own layout decides what is typed: Command is the Windows key, and on a 101-key layout the Right Option key is the Hangul toggle of the Korean IME (keyboards with dedicated keys send those too).
 
 ### Viewer keys
 
