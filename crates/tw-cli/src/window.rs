@@ -64,6 +64,50 @@ mod imp {
         Key { qcode: &'static str, down: bool },
     }
 
+    /// Pending pointer moves and wheel notches beyond this are dropped (the console is too slow).
+    const MAX_QUEUED_LOSSY: usize = 2048;
+
+    /// Hands input to the worker without ever blocking. The window thread also drives the async
+    /// runtime, where blocking is forbidden (`blocking_send` there aborted the whole window on the
+    /// first key press, 0.1.4). Key and button events are never dropped, because a lost release
+    /// would leave a key or button stuck in the guest; moves and wheel notches are bounded.
+    #[derive(Clone)]
+    pub struct InputSender {
+        tx: mpsc::UnboundedSender<Job>,
+        queued: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl InputSender {
+        pub fn channel() -> (Self, mpsc::UnboundedReceiver<Job>) {
+            let (tx, rx) = mpsc::unbounded_channel();
+            (Self { tx, queued: Arc::default() }, rx)
+        }
+
+        fn push(&self, job: Job) {
+            self.queued.fetch_add(1, Ordering::AcqRel);
+            if self.tx.send(job).is_err() {
+                self.queued.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+
+        /// For events that must arrive: keys and mouse buttons.
+        pub fn reliable(&self, job: Job) {
+            self.push(job);
+        }
+
+        /// For events a newer one supersedes: pointer moves and wheel notches.
+        pub fn lossy(&self, job: Job) {
+            if self.queued.load(Ordering::Acquire) < MAX_QUEUED_LOSSY {
+                self.push(job);
+            }
+        }
+
+        /// Called by the worker after it took `n` jobs off the queue.
+        pub fn taken(&self, n: usize) {
+            self.queued.fetch_sub(n, Ordering::AcqRel);
+        }
+    }
+
     /// Drops pointer moves that a later job supersedes, so a flood of mouse events never queues up
     /// behind the (slow) console while presses, releases and keys keep their order.
     pub fn coalesce(jobs: Vec<Job>) -> Vec<Job> {
@@ -217,16 +261,18 @@ mod imp {
         }
 
         // Input: one worker applies jobs in order.
-        let (tx, mut rx) = mpsc::channel::<Job>(512);
+        let (tx, mut rx) = InputSender::channel();
         {
             let console = console.clone();
             let proxy = proxy.clone();
+            let counter = tx.clone();
             handle.spawn(async move {
                 while let Some(first) = rx.recv().await {
                     let mut batch = vec![first];
                     while let Ok(job) = rx.try_recv() {
                         batch.push(job);
                     }
+                    counter.taken(batch.len());
                     for job in coalesce(batch) {
                         let result = match job {
                             Job::Move { x, y, size } => console.pointer(x, y, size).await,
@@ -310,7 +356,7 @@ mod imp {
         name: String,
         frame: RawFrame,
         pending: Arc<AtomicBool>,
-        tx: mpsc::Sender<Job>,
+        tx: InputSender,
         window: Option<Arc<Window>>,
         surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
         cursor: (f64, f64),
@@ -342,7 +388,10 @@ mod imp {
             if self.debug {
                 eprintln!("input: {job:?} (window position {:.0},{:.0})", self.cursor.0, self.cursor.1);
             }
-            let _ = self.tx.try_send(job);
+            match job {
+                Job::Button { .. } => self.tx.reliable(job),
+                _ => self.tx.lossy(job),
+            }
         }
 
         fn send_key(&self, qcode: &'static str, down: bool) {
@@ -350,7 +399,7 @@ mod imp {
             if self.debug {
                 eprintln!("input: key {qcode} {}", if down { "down" } else { "up" });
             }
-            let _ = self.tx.blocking_send(Job::Key { qcode, down });
+            self.tx.reliable(Job::Key { qcode, down });
         }
 
         fn release_all_keys(&mut self) {
@@ -463,7 +512,7 @@ mod imp {
                     };
                     let notches = dy.abs().round().max(if dy != 0.0 { 1.0 } else { 0.0 }) as u32;
                     for _ in 0..notches.min(10) {
-                        let _ = self.tx.try_send(Job::Wheel { up: dy > 0.0 });
+                        self.tx.lossy(Job::Wheel { up: dy > 0.0 });
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -517,6 +566,54 @@ mod imp {
                     Job::Move { x: 5, y: 5, size },
                 ]
             );
+        }
+
+        /// The window thread calls the sender while inside the runtime (it runs under `block_on`).
+        /// This is the exact situation in which `blocking_send` panicked and aborted the window.
+        #[test]
+        fn sending_input_never_blocks_inside_a_runtime() {
+            let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+            let (tx, mut rx) = InputSender::channel();
+            let size = (800, 600);
+            runtime.block_on(async {
+                tx.reliable(Job::Key { qcode: "a", down: true });
+                tx.reliable(Job::Key { qcode: "a", down: false });
+                tx.lossy(Job::Move { x: 1, y: 1, size });
+            });
+            let mut got = Vec::new();
+            while let Ok(job) = rx.try_recv() {
+                got.push(job);
+            }
+            assert_eq!(
+                got,
+                vec![Job::Key { qcode: "a", down: true }, Job::Key { qcode: "a", down: false }, Job::Move { x: 1, y: 1, size }]
+            );
+        }
+
+        #[test]
+        fn lossy_input_is_bounded_but_keys_and_buttons_never_are() {
+            let (tx, mut rx) = InputSender::channel();
+            let size = (800, 600);
+            for i in 0..(MAX_QUEUED_LOSSY as u32 + 500) {
+                tx.lossy(Job::Move { x: i % 800, y: 0, size });
+            }
+            // Even with a full queue a release must get through.
+            tx.reliable(Job::Key { qcode: "shift", down: false });
+            tx.reliable(Job::Button { x: 0, y: 0, size, button: MouseButton::Left, down: false });
+            let mut moves = 0;
+            let mut reliable = 0;
+            while let Ok(job) = rx.try_recv() {
+                match job {
+                    Job::Move { .. } => moves += 1,
+                    _ => reliable += 1,
+                }
+            }
+            assert_eq!(moves, MAX_QUEUED_LOSSY, "moves beyond the bound are dropped");
+            assert_eq!(reliable, 2, "key and button events are never dropped");
+            // After the worker drains the queue, moves flow again.
+            tx.taken(MAX_QUEUED_LOSSY + 2);
+            tx.lossy(Job::Move { x: 1, y: 1, size });
+            assert!(rx.try_recv().is_ok());
         }
 
         #[test]

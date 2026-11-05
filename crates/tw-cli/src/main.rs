@@ -13,6 +13,7 @@ use tw_core::service::VmService;
 use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
+mod bootassist;
 mod firmware_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod geometry;
@@ -485,7 +486,12 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             });
         }
         Command::Start { name } => {
+            let was_stopped = service.status(&name).await?.state == tw_core::backend::VmState::Stopped;
             let status = service.start(&name, &StartOptions::default()).await?;
+            if was_stopped {
+                // Handles the "boot from CD" prompt of a VM whose Windows installation is not done.
+                bootassist::assist(&service, &name).await;
+            }
             out.emit(serde_json::to_value(&status).unwrap_or_default(), kv);
         }
         Command::Stop { name, force } => {
