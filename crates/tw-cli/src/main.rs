@@ -13,6 +13,7 @@ use tw_core::service::VmService;
 use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
+mod firmware_cmd;
 mod media;
 mod view;
 
@@ -122,6 +123,11 @@ enum Command {
         #[arg(long)]
         detach_media: bool,
     },
+    /// Secure Boot capable UEFI firmware (required by Windows 11 on AArch64).
+    Firmware {
+        #[command(subcommand)]
+        command: FirmwareCommand,
+    },
     /// Run the MCP server on stdio for agents (Claude Code, Codex, Cursor, ...).
     Mcp {
         #[arg(default_value = "default")]
@@ -138,6 +144,18 @@ enum Command {
         #[command(subcommand)]
         action: Action,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum FirmwareCommand {
+    /// Install the firmware published with the latest release (SHA-256 verified).
+    Install {
+        /// Install a local build (a directory with code.fd and vars.fd, see firmware/build.sh).
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
+    /// List the UEFI firmware QEMU can use for this host.
+    List,
 }
 
 #[derive(Subcommand, Debug)]
@@ -290,7 +308,7 @@ fn confirm(prompt: &str) -> TwResult<bool> {
 async fn run(cli: Cli, out: &Output) -> TwResult<()> {
     let host = HostInfo::current();
     let store = Store::from_env()?;
-    let backend: Arc<dyn VirtualizationBackend> = Arc::new(tw_qemu::QemuBackend::new(host));
+    let backend: Arc<dyn VirtualizationBackend> = Arc::new(tw_qemu::QemuBackend::new(host, store.root().join("firmware")));
     let service = VmService::new(store.clone(), backend.clone());
 
     match cli.command {
@@ -319,6 +337,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             });
             out.emit(value, |v| serde_json::to_string_pretty(v).unwrap_or_default());
         }
+        Command::Firmware { command } => firmware_cmd::run(command, &store, host, out).await?,
         Command::Image { command } => media::run(command, &store, host, out).await?,
         Command::Create { name, iso, drivers_iso, arch, cpus, memory, disk, width, height, offline } => {
             let arch = match arch {
@@ -555,6 +574,8 @@ mod tests {
         for args in [
             vec!["terminal-windows", "doctor"],
             vec!["terminal-windows", "image", "list"],
+            vec!["terminal-windows", "firmware", "install", "--from", "/tmp/fw"],
+            vec!["terminal-windows", "firmware", "list"],
             vec!["terminal-windows", "image", "download", "--language", "Korean"],
             vec!["terminal-windows", "image", "import", "/tmp/Win11.iso", "--move"],
             vec!["terminal-windows", "create", "dev"],

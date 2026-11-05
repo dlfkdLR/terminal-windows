@@ -66,10 +66,13 @@ jobs:
           name: agent-${{ matrix.target }}
           path: dist/*
 
+  firmware:
+    uses: ./.github/workflows/firmware.yml
+
   publish:
-    needs: [build, agent]
-    # The guest agent is not yet validated; a failed agent build must not block the CLI release.
-    if: ${{ always() && needs.build.result == 'success' }}
+    needs: [build, agent, firmware]
+    # The guest agent and the firmware build must not block the CLI release if they fail.
+    if: ${{ always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

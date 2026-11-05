@@ -5,7 +5,7 @@ use crate::detect;
 use crate::firmware::{self, Firmware};
 use async_trait::async_trait;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tw_core::backend::{Capabilities, StartOptions, StopMode, Support, VirtualizationBackend, VmState, VmStatus};
@@ -21,11 +21,13 @@ const FIRMWARE_FILE: &str = "firmware.json";
 
 pub struct QemuBackend {
     host: HostInfo,
+    /// `<data>/firmware`: firmware installed by `terminal-windows firmware install`.
+    firmware_dir: PathBuf,
 }
 
 impl QemuBackend {
-    pub fn new(host: HostInfo) -> Self {
-        Self { host }
+    pub fn new(host: HostInfo, firmware_dir: PathBuf) -> Self {
+        Self { host, firmware_dir }
     }
 
     fn accelerator(&self) -> TwResult<&'static str> {
@@ -58,7 +60,7 @@ impl QemuBackend {
         if fw.code.is_file() {
             return Ok(fw);
         }
-        let current = firmware::discover(&firmware::descriptor_dirs(install.prefix.as_deref()), arch);
+        let current = firmware::discover(&firmware::descriptor_dirs(install.prefix.as_deref(), Some(&self.firmware_dir)), arch);
         match relocate(&fw, &current) {
             Some(moved) => {
                 tracing::info!(from = %fw.code.display(), to = %moved.code.display(), "firmware moved (QEMU upgraded?); using the new location");
@@ -73,13 +75,19 @@ impl QemuBackend {
     }
 
     fn select_firmware(&self, install: &detect::QemuInstall, arch: Arch) -> TwResult<Firmware> {
-        let found = firmware::discover(&firmware::descriptor_dirs(install.prefix.as_deref()), arch);
+        let found = firmware::discover(&firmware::descriptor_dirs(install.prefix.as_deref(), Some(&self.firmware_dir)), arch);
         let fw = found.into_iter().next().ok_or_else(|| {
             TwError::new(ErrorCode::MissingDependency, format!("no UEFI firmware descriptor for {} was found", arch.as_str()))
                 .with_hint("Install a QEMU build that ships edk2 firmware (Homebrew and the official Windows installer do).")
         })?;
         if !fw.secure_boot {
-            tracing::warn!(firmware = %fw.code.display(), "selected UEFI firmware is not Secure Boot capable; Windows Setup performs its own requirement checks");
+            // Windows 11 Setup stops with "PC must support Secure Boot" (measured 2026-11-05
+            // with Homebrew's firmware). Refuse early instead of failing hours into a setup.
+            return Err(TwError::new(
+                ErrorCode::MissingDependency,
+                format!("the available UEFI firmware ({}) does not support Secure Boot, which Windows 11 requires", fw.code.display()),
+            )
+            .with_hint("Run: terminal-windows firmware install   (Secure Boot capable firmware built for QEMU's virt machine)"));
         }
         Ok(fw)
     }
@@ -243,7 +251,7 @@ impl VirtualizationBackend for QemuBackend {
         };
         let uefi = match (&install, arch) {
             (Some(i), Some(a)) => {
-                let fws = firmware::discover(&firmware::descriptor_dirs(i.prefix.as_deref()), a);
+                let fws = firmware::discover(&firmware::descriptor_dirs(i.prefix.as_deref(), Some(&self.firmware_dir)), a);
                 match fws.first() {
                     Some(f) if f.secure_boot => Support::unverified(format!("Secure Boot capable firmware found: {}", f.code.display())),
                     Some(f) => Support::unverified(format!("UEFI firmware without Secure Boot: {}", f.code.display())),
@@ -499,7 +507,7 @@ mod tests {
         let store = tw_core::store::Store::new(tmp.path().to_path_buf());
         let name = tw_core::VmName::parse("dev").unwrap();
         let paths = store.paths(&name);
-        let backend = QemuBackend::new(HostInfo::current());
+        let backend = QemuBackend::new(HostInfo::current(), PathBuf::from("/nonexistent"));
         assert!(backend.connect(&paths).await.unwrap().is_none());
     }
 }

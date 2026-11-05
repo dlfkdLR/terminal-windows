@@ -218,7 +218,7 @@ virtio-serial 포트는 게스트 내부의 **아무 프로세스나** 열 수 �
 | P1 | Rust 기반: 설정 모델, Store, 오류/종료코드, 백엔드 trait, CLI 골격, 로깅 | `cargo test` 통과, `doctor`/`create`/`ls`/`config` 실제 동작 | ✅ 기초 완료 |
 | P2a | QEMU 탐지·가속기·펌웨어 디스크립터·커맨드라인 생성·QMP 클라이언트 | 명령행 단위테스트 + 모의 QMP 통합테스트 | ✅ 기초 완료 |
 | P2b | 실제 부팅 (Apple Silicon) | `start` → UEFI 화면 스크린샷(QMP) 획득, `pause/resume/stop` 실측 | ✅ 2026-11-05 (compatibility.md 실측 기록) |
-| P2c | Plane H 제어 | ISO 부팅 → 설치 화면을 `action screenshot/click/key`로 진행 | 🟡 키보드·스크린샷 실측 완료, 마우스·Windows ISO 대기 |
+| P2c | Plane H 제어 | ISO 부팅 → 설치 화면을 `action screenshot/click/key`로 진행 | ✅ 2026-11-05 Windows 11 설치 프로그램을 마우스·키보드로 사용 조건 화면까지 진행 (compatibility.md) |
 | P3a | 프로토콜 v1 + 전송 | 핸드셰이크·HMAC·재생방지·크기제한 테스트(완료), virtio-serial 실측 | 🟡 프로토콜 완료, 실측 대기 |
 | P3b | Hyper-V 백엔드 (Windows 호스트) | Gen2+vTPM VM 생성, hvsocket 연결 | ⏳ Windows 장비 필요 |
 | P4 | Windows 에이전트 | 로그인 후 `action type "한글 테스트"`가 메모장에 입력됨 | 🟡 순수 로직 완료, Win32 부분 CI 컴파일 |

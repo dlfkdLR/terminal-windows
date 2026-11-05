@@ -5,6 +5,15 @@ use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use tw_core::{ErrorCode, TwError, TwResult};
 
+/// HTTP client with this project's user agent, for downloads that are not from Microsoft.
+pub fn http_client() -> TwResult<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(concat!("terminal-windows/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| TwError::backend(format!("HTTP client: {e}")))
+}
+
 pub fn part_path(dest: &Path) -> PathBuf {
     let mut name = dest.file_name().map(|n| n.to_os_string()).unwrap_or_default();
     name.push(".part");

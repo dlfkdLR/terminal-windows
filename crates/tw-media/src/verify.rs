@@ -5,6 +5,11 @@ use std::path::Path;
 use tokio::io::AsyncReadExt;
 use tw_core::{TwError, TwResult};
 
+/// SHA-256 of an in-memory buffer, lower-case hex.
+pub fn sha256_bytes(data: &[u8]) -> String {
+    hex::encode(Sha256::digest(data))
+}
+
 /// Hashes `path`, calling `progress(done, total)` at most every 256 MiB.
 pub async fn sha256_file(path: &Path, mut progress: impl FnMut(u64, u64)) -> TwResult<String> {
     let mut file = tokio::fs::File::open(path).await.map_err(|e| TwError::io(path.display(), e))?;
@@ -38,5 +43,6 @@ mod tests {
         let f = dir.path().join("abc");
         std::fs::write(&f, b"abc").unwrap();
         assert_eq!(sha256_file(&f, |_, _| {}).await.unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(sha256_bytes(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 }

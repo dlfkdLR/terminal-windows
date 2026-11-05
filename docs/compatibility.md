@@ -7,7 +7,7 @@
 | 1. 빌드 | ✅ 2026-11-05, macOS 26 arm64, Rust 1.96 | ⏳ CI(macos-13) | ⏳ CI(windows-latest) | ⏳ 백엔드 미구현 |
 | 2. CLI 실행 | ✅ 2026-11-05 (`doctor`/`ls`/`status`/`create` 오류 경로/`mcp`) | ⏳ | ⏳ | ⏳ |
 | 3. VM 부팅 | 🟡 2026-11-05 UEFI 펌웨어까지 (아래 실측 기록). Windows 미디어로는 미검증 | ⏳ | ⏳ swtpm 부재로 Win11 불가 예상 | ⏳ |
-| 4. Windows 설치 | 🟡 2026-11-05 Windows 11 26H2 ARM64(한국어) 설치 프로그램 부팅, 마우스·키보드로 언어→키보드→설치 옵션→제품 키 화면까지 진행 | ⏳ | ⏳ | ⏳ |
+| 4. Windows 설치 | 🟡 2026-11-05 Windows 11 26H2 ARM64(한국어) 설치 프로그램이 요구사항 검사(Secure Boot·TPM)를 통과해 사용 조건 화면까지 진행. 파일 복사·OOBE·로그인은 ⏳ | ⏳ | ⏳ | ⏳ |
 | 5. 에이전트 연결 | ⏳ | ⏳ | ⏳ | ⏳ |
 | 6. 터미널 뷰어 | ⏳ (뷰어 미구현) | ⏳ | ⏳ | ⏳ |
 | 7. MCP 제어 | 🟡 2026-11-05 실제 VM(UEFI)에 stdio로 호출 성공. Claude Code/Codex 클라이언트 연동은 ⏳ | ⏳ | ⏳ | ⏳ |
@@ -42,6 +42,19 @@
 
 주의: 부팅 직후 EDK II의 5초 `startup.nsh` 카운트다운 중에 입력하면 "아무 키"로 소비됩니다(테스트 타이밍 문제, 코드 결함 아님).
 
+## 실측 기록: Secure Boot 펌웨어 (2026-11-05)
+
+Windows 11 설치 프로그램이 "PC에서 보안 부팅을 지원해야 합니다"로 진행을 거부함. 원인과 해결은 [firmware/README.md](../firmware/README.md).
+
+| 펌웨어 | HVF에서 | Windows 설치 요구사항 |
+|---|---|---|
+| Homebrew QEMU 11.1.3 기본 | ✅ 부팅 | ❌ Secure Boot 없음 |
+| Debian AAVMF 2025.02 / 2026.08 (secboot, no-secboot 모두) | ❌ "Start boot option"에서 멈춤(vCPU 100%). TCG에서는 정상 | - |
+| UTM 5.0.8 secure | ✅ 펌웨어는 동작, ❌ ramfb 없음 → virtio-gpu 사용 시 Windows 화면 정지 | - |
+| **직접 빌드** (QEMU 11.1.3 소스의 edk2 + `SECURE_BOOT_ENABLE`) | ✅ Windows 설치 프로그램 부팅 | ✅ 통과 (TPM `ppi=off` 상태) |
+
+환경 변화 기록: 이 작업 중 `brew install lld`가 Homebrew LLVM을 23으로 올려 Homebrew Rust(1.96)가 깨졌고, `brew reinstall rust`로 복구하면서 Rust가 1.99.1로 올라감. 전체 테스트·clippy·fmt는 1.99.1에서 재확인함.
+
 ## 실측 기록: Windows ISO 다운로드 (2026-11-05)
 
 | 항목 | 결과 |
@@ -56,7 +69,7 @@
 
 ## 자동 테스트 (2026-11-05, Apple Silicon, macOS 26, Rust 1.96)
 
-`cargo test --workspace`: 114개 통과, 0 실패. `cargo clippy --workspace --all-targets -D warnings` 통과, `cargo fmt --check` 통과.
+`cargo test --workspace`: 121개 통과, 0 실패. `cargo clippy --workspace --all-targets -D warnings` 통과, `cargo fmt --check` 통과.
 이 테스트는 프로토콜·명령행 생성·모의 QMP·모의 백엔드 수준의 검증이며, **실제 VM 부팅이나 Windows 제어의 증거가 아닙니다.**
 
 게스트 에이전트의 `cfg(windows)` 코드(`win32.rs`, `main.rs`의 windows 경로)는 이 장비에 Windows 타깃 표준 라이브러리가 없어 **로컬 컴파일되지 않았습니다.** CI의 `windows-agent` 잡에서 처음 컴파일됩니다.

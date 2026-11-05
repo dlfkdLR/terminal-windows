@@ -115,9 +115,33 @@ pub fn parse_descriptor(json: &str, source: &Path, arch: Arch) -> Option<Firmwar
     Some(fw)
 }
 
+/// Name of the firmware this project builds and publishes (see firmware/build.sh).
+pub const MANAGED_AARCH64_SECBOOT: &str = "edk2-aarch64-secboot";
+
+/// Writes a QEMU-style descriptor for managed firmware files so that
+/// [`discover`] finds them like any distribution firmware.
+pub fn write_managed_descriptor(dir: &Path, name: &str, arch: Arch, code: &Path, vars: &Path) -> std::io::Result<PathBuf> {
+    let json = serde_json::json!({
+        "description": format!("terminal-windows managed UEFI firmware ({name}): edk2 with Secure Boot, no keys enrolled"),
+        "interface-types": ["uefi"],
+        "mapping": { "device": "flash",
+            "executable": { "filename": code.to_string_lossy(), "format": "raw" },
+            "nvram-template": { "filename": vars.to_string_lossy(), "format": "raw" } },
+        "targets": [{ "architecture": arch.as_str(), "machines": ["virt-*"] }],
+        "features": ["secure-boot", "verbose-static"],
+        "tags": []
+    });
+    // The 30- prefix sorts before distribution descriptors (50-/60-).
+    let path = dir.join(format!("30-{name}.json"));
+    std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap_or_default())?;
+    Ok(path)
+}
+
 /// Standard descriptor directories for a QEMU installed under `prefix`.
-pub fn descriptor_dirs(prefix: Option<&Path>) -> Vec<PathBuf> {
+pub fn descriptor_dirs(prefix: Option<&Path>, managed: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
+    // Firmware installed by `terminal-windows firmware install`.
+    dirs.extend(managed.map(Path::to_path_buf));
     if let Some(prefix) = prefix {
         dirs.push(prefix.join("share/qemu/firmware"));
         // QEMU for Windows installs to <prefix>\share\firmware.
@@ -181,7 +205,8 @@ mod tests {
             std::fs::write(share.join("qemu").join(f), b"x").unwrap();
         }
         let q = share.join("qemu");
-        let p = |f: &str| q.join(f).display().to_string();
+        // JSON string: Windows paths must use forward slashes (backslashes would need escaping).
+        let p = |f: &str| q.join(f).display().to_string().replace('\\', "/");
         write(&fwdir, "60-plain.json", &descriptor(&p("code.fd"), &p("vars.fd"), "x86_64", r#""acpi-s3""#));
         write(
             &fwdir,

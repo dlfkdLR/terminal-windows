@@ -26,6 +26,17 @@ curl -fsSL https://github.com/dlfkdLR/terminal-windows/releases/latest/download/
 
 최신 릴리스를 받아 `SHA256SUMS`로 검증한 뒤 `~/.local/bin/terminal-windows` 하나만 설치합니다(관리자 권한·셸 설정 변경 없음). Windows: `irm https://github.com/dlfkdLR/terminal-windows/releases/latest/download/install.ps1 | iex` (실험적).
 
+### Apple Silicon: Secure Boot 펌웨어
+
+Windows 11은 Secure Boot 가능 펌웨어를 요구하는데 Homebrew QEMU의 펌웨어에는 없습니다. 한 번만 설치하세요(릴리스에서 받아 SHA-256 검증):
+
+```sh
+terminal-windows firmware install
+terminal-windows firmware list      # Secure Boot 지원 여부 확인
+```
+
+경위와 직접 빌드 방법: [firmware/README.md](firmware/README.md)
+
 ## 빌드와 사용
 
 ```sh
@@ -34,7 +45,9 @@ B=target.nosync/release/terminal-windows   # .cargo/config.toml: 동기화 폴�
 
 $B doctor                                   # QEMU/가속기/펌웨어/TPM 실측
 $B image download --language Korean         # Microsoft에서 받기 + 공식 SHA-256 검증
+$B firmware install                         # (Apple Silicon, 최초 1회) Secure Boot 펌웨어
 $B create dev                               # 캐시의 검증된 ISO 자동 사용 (--iso로 직접 지정 가능)
+$B view dev                                 # 터미널에서 화면 보기·조작 (Ghostty/Kitty/WezTerm), Ctrl+] 종료
 $B start dev
 $B action dev screenshot                    # PNG 경로 출력
 $B action dev click 400 300

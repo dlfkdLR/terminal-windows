@@ -1,0 +1,29 @@
+name: Firmware
+# Builds the Secure Boot capable AArch64 UEFI firmware (firmware/build.sh).
+# Runs on changes to the build, manually, and as part of releases.
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    paths: ["firmware/**", ".github/workflows/firmware.yml"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: brew install llvm lld acpica nasm
+      - name: Build firmware
+        run: firmware/build.sh "$RUNNER_TEMP/fw"
+      - name: Package
+        run: |
+          mkdir dist
+          gzip -9 -c "$RUNNER_TEMP/fw/code.fd" > dist/edk2-aarch64-secboot-code.fd.gz
+          gzip -9 -c "$RUNNER_TEMP/fw/vars.fd" > dist/edk2-aarch64-secboot-vars.fd.gz
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/*

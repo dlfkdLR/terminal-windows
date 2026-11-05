@@ -1791,7 +1791,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tw-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tokio",
  "tw-core",
@@ -1802,11 +1802,13 @@ dependencies = [
 
 [[package]]
 name = "tw-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "flate2",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -1824,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "tw-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "dirs",
@@ -1841,11 +1843,11 @@ dependencies = [
 
 [[package]]
 name = "tw-input"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "tw-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1857,7 +1859,7 @@ dependencies = [
 
 [[package]]
 name = "tw-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "hex",
@@ -1874,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "tw-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "hmac",
@@ -1887,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "tw-qemu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "png",
@@ -1902,7 +1904,7 @@ dependencies = [
 
 [[package]]
 name = "tw-renderer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
 ]
