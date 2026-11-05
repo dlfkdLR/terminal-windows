@@ -1,0 +1,26 @@
+[package]
+name = "tw-agent"
+description = "terminal-windows guest agent: runs inside the Windows VM, never on the host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tw-agent"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "io-util", "sync", "time"] }
+tw-core.workspace = true
+tw-input.workspace = true
+tw-protocol.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_StationsAndDesktops",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

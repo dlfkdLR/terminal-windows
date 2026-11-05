@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tw-core",
+    "crates/tw-input",
+    "crates/tw-protocol",
+    "crates/tw-qemu",
+    "crates/tw-renderer",
+    "crates/tw-mcp",
+    "crates/tw-cli",
+    "guest/windows-agent",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+repository = "https://github.com/OWNER/terminal-windows"
+
+[workspace.dependencies]
+tw-core = { path = "crates/tw-core" }
+tw-protocol = { path = "crates/tw-protocol" }
+tw-qemu = { path = "crates/tw-qemu" }
+tw-input = { path = "crates/tw-input" }
+tw-renderer = { path = "crates/tw-renderer" }
+tw-mcp = { path = "crates/tw-mcp" }
+async-trait = "0.1"
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+dirs = "5"
+hex = "0.4"
+hmac = "0.12"
+png = "0.17"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "net", "time", "process", "fs", "sync"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
