@@ -13,6 +13,8 @@ use tw_core::service::VmService;
 use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
+mod media;
+
 #[derive(Parser, Debug)]
 #[command(name = "terminal-windows", version, about = "Run and control Windows virtual machines from a terminal")]
 struct Cli {
@@ -39,8 +41,9 @@ enum Command {
     Create {
         name: VmName,
         /// Windows installation ISO (x64 on Intel/AMD hosts, ARM64 on Apple Silicon).
+        /// Defaults to the newest verified image in the cache (`terminal-windows image download`).
         #[arg(long)]
-        iso: PathBuf,
+        iso: Option<PathBuf>,
         /// Optional driver ISO (e.g. virtio-win, needed for networking on ARM64).
         #[arg(long)]
         drivers_iso: Option<PathBuf>,
@@ -138,8 +141,38 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum ImageCommand {
-    /// List ISO files in the image cache directory.
+    /// List cached, verified Windows images.
     List,
+    /// Show the current official release and its published SHA-256 (no download).
+    Info {
+        #[arg(long, value_parser = parse_arch)]
+        arch: Option<Arch>,
+        #[arg(long, default_value = "English")]
+        language: String,
+    },
+    /// Download Windows 11 from Microsoft and verify it against the published SHA-256.
+    Download {
+        #[arg(long, value_parser = parse_arch)]
+        arch: Option<Arch>,
+        /// Language as listed by Microsoft, e.g. English, Korean, Japanese.
+        #[arg(long, default_value = "English")]
+        language: String,
+        /// Do not open the browser if Microsoft refuses an automated download.
+        #[arg(long)]
+        no_browser: bool,
+        /// How long to wait for a browser download to finish.
+        #[arg(long, default_value_t = 180)]
+        wait_minutes: u64,
+    },
+    /// Verify an ISO you downloaded from Microsoft and add it to the cache.
+    Import {
+        path: PathBuf,
+        #[arg(long, value_parser = parse_arch)]
+        arch: Option<Arch>,
+        /// Move the file into the cache instead of copying it.
+        #[arg(long = "move")]
+        move_file: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -285,30 +318,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
             });
             out.emit(value, |v| serde_json::to_string_pretty(v).unwrap_or_default());
         }
-        Command::Image { command: ImageCommand::List } => {
-            let dir = store.root().join("images");
-            let mut isos: Vec<Value> = std::fs::read_dir(&dir)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|x| x.eq_ignore_ascii_case("iso")))
-                .map(|e| json!({ "path": e.path(), "bytes": e.metadata().map(|m| m.len()).unwrap_or(0) }))
-                .collect();
-            isos.sort_by(|a, b| a["path"].to_string().cmp(&b["path"].to_string()));
-            let value = json!({ "directory": dir, "images": isos,
-                "note": "terminal-windows never downloads or redistributes Windows media. Download an ISO from Microsoft and pass it with --iso." });
-            out.emit(value, |v| {
-                let list = v["images"]
-                    .as_array()
-                    .map(|a| a.iter().map(|i| i["path"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>().join("\n"))
-                    .unwrap_or_default();
-                format!(
-                    "{}\n{}",
-                    if list.is_empty() { format!("No ISO files in {}", v["directory"].as_str().unwrap_or("")) } else { list },
-                    v["note"].as_str().unwrap_or("")
-                )
-            });
-        }
+        Command::Image { command } => media::run(command, &store, host, out).await?,
         Command::Create { name, iso, drivers_iso, arch, cpus, memory, disk, width, height, offline } => {
             let arch = match arch {
                 Some(a) => a,
@@ -330,7 +340,22 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 disk_gib: disk,
                 display,
                 network: if offline { NetworkMode::Offline } else { NetworkMode::Nat },
-                install_iso: Some(abs(iso)),
+                install_iso: Some(match iso {
+                    Some(p) => abs(p),
+                    None => {
+                        let cached = tw_media::cache::find(&tw_media::cache::images_dir(store.root()), arch, None).ok_or_else(|| {
+                            TwError::not_found(format!("no verified Windows 11 {} image in the cache", arch.windows_name()))
+                                .with_hint("terminal-windows image download   (or pass --iso /path/to/Win11.iso)")
+                        })?;
+                        eprintln!(
+                            "Using cached image {} ({}, {})",
+                            cached.path.display(),
+                            cached.record.language,
+                            cached.record.version.as_deref().unwrap_or("?")
+                        );
+                        cached.path
+                    }
+                }),
                 drivers_iso: drivers_iso.map(abs),
             };
             let host_cpus = std::thread::available_parallelism().map(|n| n.get() as u32).unwrap_or(2);
@@ -529,6 +554,9 @@ mod tests {
         for args in [
             vec!["terminal-windows", "doctor"],
             vec!["terminal-windows", "image", "list"],
+            vec!["terminal-windows", "image", "download", "--language", "Korean"],
+            vec!["terminal-windows", "image", "import", "/tmp/Win11.iso", "--move"],
+            vec!["terminal-windows", "create", "dev"],
             vec!["terminal-windows", "create", "dev", "--iso", "./windows.iso"],
             vec!["terminal-windows", "stop", "dev", "--force"],
             vec!["terminal-windows", "--json", "ls"],

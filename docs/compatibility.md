@@ -42,9 +42,20 @@
 
 주의: 부팅 직후 EDK II의 5초 `startup.nsh` 카운트다운 중에 입력하면 "아무 키"로 소비됩니다(테스트 타이밍 문제, 코드 결함 아님).
 
+## 실측 기록: Windows ISO 다운로드 (2026-11-05)
+
+| 항목 | 결과 |
+|---|---|
+| 공식 페이지 파싱 (ARM64 `3816`, x64 `3813`, 버전 26H2, 언어 38개 SHA-256) | ✅ |
+| SKU API (언어 목록) | ✅ |
+| 다운로드 링크 API | ❌ Microsoft Sentinel이 거부 (`ErrorSettings.SentinelReject`). 우회하지 않음 → 브라우저 대체 경로 |
+| 브라우저 대체 경로: 안내 출력 → 다운로드 폴더 감시 → 시간 초과 시 `image import` 안내 | ✅ (실제 ISO 완주는 ⏳ 사용자 다운로드 필요) |
+| 위조 파일 `image import` 거부 | ✅ |
+| 이어받기(Range) 다운로드, 감시, 캐시 | ✅ 로컬 테스트 서버로 자동 테스트 |
+
 ## 자동 테스트 (2026-11-05, Apple Silicon, macOS 26, Rust 1.96)
 
-`cargo test --workspace`: 103개 통과, 0 실패. `cargo clippy --workspace --all-targets -D warnings` 통과, `cargo fmt --check` 통과.
+`cargo test --workspace`: 114개 통과, 0 실패. `cargo clippy --workspace --all-targets -D warnings` 통과, `cargo fmt --check` 통과.
 이 테스트는 프로토콜·명령행 생성·모의 QMP·모의 백엔드 수준의 검증이며, **실제 VM 부팅이나 Windows 제어의 증거가 아닙니다.**
 
 게스트 에이전트의 `cfg(windows)` 코드(`win32.rs`, `main.rs`의 windows 경로)는 이 장비에 Windows 타깃 표준 라이브러리가 없어 **로컬 컴파일되지 않았습니다.** CI의 `windows-agent` 잡에서 처음 컴파일됩니다.

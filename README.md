@@ -16,7 +16,7 @@
 
 - Rust 1.89+
 - QEMU 7.1+ 와 swtpm (macOS: `brew install qemu swtpm`)
-- Windows 11 설치 ISO (Microsoft에서 직접 받은 정품 미디어). Apple Silicon은 **ARM64** ISO.
+- Windows 11 설치 ISO: `terminal-windows image download`가 Microsoft에서 받아 검증합니다(아래). Apple Silicon은 **ARM64**.
 
 ## 빌드와 사용
 
@@ -25,7 +25,8 @@ cargo build --release
 B=target.nosync/release/terminal-windows   # .cargo/config.toml: 동기화 폴더 대비
 
 $B doctor                                   # QEMU/가속기/펌웨어/TPM 실측
-$B create dev --iso ~/Downloads/Win11_ARM64.iso --drivers-iso ~/Downloads/virtio-win.iso
+$B image download --language Korean         # Microsoft에서 받기 + 공식 SHA-256 검증
+$B create dev                               # 캐시의 검증된 ISO 자동 사용 (--iso로 직접 지정 가능)
 $B start dev
 $B action dev screenshot                    # PNG 경로 출력
 $B action dev click 400 300
@@ -34,6 +35,17 @@ $B action dev type "Hello Windows"          # 에이전트 없이는 US-ASCII만
 $B stop dev                                 # ACPI 종료 요청 (--force: 즉시 전원 차단)
 $B delete dev                               # 확인 필요 (--force로 생략)
 ```
+
+### Windows ISO 받기
+
+terminal-mac이 Apple에서 macOS 이미지를 받듯, `image download`는 **Microsoft 공식 다운로드 페이지**에서 현재 릴리스와 언어별 SHA-256을 읽고, 페이지가 쓰는 것과 같은 API로 다운로드 링크를 요청합니다.
+
+- 링크가 발급되면: 이어받기 가능한 다운로드 → SHA-256 검증 → 캐시 등록.
+- Microsoft가 자동 요청을 거부하면(봇 차단 "Sentinel", 2026-11-05 실측 시 항상 거부): **우회하지 않고** 공식 페이지를 브라우저로 열어 안내하고, 다운로드 폴더를 감시하다가 완료되면 SHA-256을 검증해 캐시로 옮깁니다.
+- 이미 받은 ISO: `image import PATH [--move]` (공식 해시와 일치해야 등록).
+- `image info`: 다운로드 없이 현재 버전·해시 확인. `image list`: 캐시 목록.
+
+ISO를 번들하거나 재배포하지 않으며, 검증되지 않은 파일은 캐시에 넣지 않습니다(`create --iso`로 명시하면 사용 가능).
 
 모든 명령은 `--json`을 지원하며 실패 시 안정적인 오류 코드와 종료 코드를 반환합니다(`tw-core/src/error.rs`).
 

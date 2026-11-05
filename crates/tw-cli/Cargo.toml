@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true
@@ -20,6 +21,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tw-core.workspace = true
 tw-mcp.workspace = true
+tw-media.workspace = true
 tw-qemu.workspace = true
 tw-renderer.workspace = true
 

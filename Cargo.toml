@@ -7,6 +7,7 @@ members = [
     "crates/tw-qemu",
     "crates/tw-renderer",
     "crates/tw-mcp",
+    "crates/tw-media",
     "crates/tw-cli",
     "guest/windows-agent",
 ]
@@ -25,6 +26,7 @@ tw-qemu = { path = "crates/tw-qemu" }
 tw-input = { path = "crates/tw-input" }
 tw-renderer = { path = "crates/tw-renderer" }
 tw-mcp = { path = "crates/tw-mcp" }
+tw-media = { path = "crates/tw-media" }
 async-trait = "0.1"
 anyhow = "1"
 base64 = "0.22"
