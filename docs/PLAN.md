@@ -217,8 +217,8 @@ virtio-serial 포트는 게스트 내부의 **아무 프로세스나** 열 수 �
 | P0 | upstream 분석, 라이선스 | upstream-analysis.md, PROVENANCE.md | ✅ 완료 |
 | P1 | Rust 기반: 설정 모델, Store, 오류/종료코드, 백엔드 trait, CLI 골격, 로깅 | `cargo test` 통과, `doctor`/`create`/`ls`/`config` 실제 동작 | ✅ 기초 완료 |
 | P2a | QEMU 탐지·가속기·펌웨어 디스크립터·커맨드라인 생성·QMP 클라이언트 | 명령행 단위테스트 + 모의 QMP 통합테스트 | ✅ 기초 완료 |
-| P2b | 실제 부팅 (Apple Silicon) | `start` → UEFI 화면 스크린샷(QMP) 획득, `pause/resume/stop` 실측 | ⏳ QEMU 설치 후 |
-| P2c | Plane H 제어 | ISO 부팅 → 설치 화면을 `action screenshot/click/key`로 진행 | ⏳ |
+| P2b | 실제 부팅 (Apple Silicon) | `start` → UEFI 화면 스크린샷(QMP) 획득, `pause/resume/stop` 실측 | ✅ 2026-11-05 (compatibility.md 실측 기록) |
+| P2c | Plane H 제어 | ISO 부팅 → 설치 화면을 `action screenshot/click/key`로 진행 | 🟡 키보드·스크린샷 실측 완료, 마우스·Windows ISO 대기 |
 | P3a | 프로토콜 v1 + 전송 | 핸드셰이크·HMAC·재생방지·크기제한 테스트(완료), virtio-serial 실측 | 🟡 프로토콜 완료, 실측 대기 |
 | P3b | Hyper-V 백엔드 (Windows 호스트) | Gen2+vTPM VM 생성, hvsocket 연결 | ⏳ Windows 장비 필요 |
 | P4 | Windows 에이전트 | 로그인 후 `action type "한글 테스트"`가 메모장에 입력됨 | 🟡 순수 로직 완료, Win32 부분 CI 컴파일 |
@@ -265,4 +265,6 @@ virtio-serial 포트는 게스트 내부의 **아무 프로세스나** 열 수 �
 - `tw-cli`: `doctor`, `create`, `ls`, `status`, `config`, `start`, `stop`, `pause`, `resume`, `delete`, `logs`, `action ...`, `mcp`.
 - `guest/windows-agent`: 요청 디스패처, 좌표 정규화, UTF-16 청킹 등 플랫폼 독립 로직 + 테스트. Win32 `SendInput` 구현은 `cfg(windows)`이며 **로컬에서 컴파일 불가 → GitHub Actions windows-latest에서 컴파일 검증 예정**.
 
-**미실측(정직하게 표기):** QEMU 실제 부팅, Windows 설치, 에이전트 연결, 터미널 그래픽 실표시, MCP 클라이언트 실연동. 이 개발 장비에는 QEMU/swtpm이 설치되어 있지 않습니다(`brew install qemu swtpm` 필요).
+**실측 완료 (2026-11-05):** Apple Silicon + QEMU 11.1.3 + HVF로 UEFI 펌웨어까지 부팅, QMP 스크린샷·키보드 입력·pause/resume/강제 종료·재시작·삭제, 실제 VM 대상 MCP 호출. 상세는 compatibility.md.
+
+**미실측:** Windows 설치(정품 ARM64 ISO 필요), 마우스 입력, 에이전트 연결, 터미널 그래픽 실표시, MCP 클라이언트(Claude Code/Codex) 실연동.

@@ -437,6 +437,9 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 .map_err(|e| TwError::io("MCP stdio", e))?;
         }
         Command::Action { name, action } => {
+            // QEMU's QMP socket serves one client at a time, so read the VM
+            // status before the console connection is opened and held.
+            let vm_status = if matches!(action, Action::Status) { Some(service.status(&name).await?) } else { None };
             let control = service.console(&name).await?;
             let value = match action {
                 Action::Screenshot { output } => {
@@ -479,7 +482,7 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 }
                 Action::Status => {
                     let (w, h) = control.display_size().await?;
-                    json!({ "vm": service.status(&name).await?, "plane": control.plane(), "display": { "width": w, "height": h },
+                    json!({ "vm": vm_status, "plane": control.plane(), "display": { "width": w, "height": h },
                             "guest_agent": "not connected (Plane G is not implemented on the host yet)" })
                 }
             };

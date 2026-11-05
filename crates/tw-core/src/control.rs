@@ -43,6 +43,9 @@ pub mod limits {
     pub const MAX_CLICKS: u8 = 3;
 }
 
+/// Implementations may hold an exclusive connection (QEMU's QMP socket accepts
+/// one client at a time): drop the control before opening another connection
+/// to the same VM.
 #[async_trait]
 pub trait ComputerControl: Send + Sync {
     /// Short identifier of the plane, for status output ("qmp", "agent").

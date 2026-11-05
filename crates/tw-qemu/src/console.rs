@@ -26,8 +26,16 @@ pub struct QmpConsole<S> {
     /// Private directory (0700) where QEMU writes screendumps.
     scratch: PathBuf,
     size: Mutex<Option<(u32, u32)>>,
-    key_delay: Duration,
+    /// Gap between individual keyboard events. QEMU's USB HID queue holds 16
+    /// events and drops the rest; firmware (UEFI) polls the keyboard slowly.
+    /// Measured 2026-11-05 (QEMU 11.1.3, HVF, EDK II shell): batched events at
+    /// 8 ms/char lost input; one event per 15 ms garbled it; 30 ms and 50 ms
+    /// typed a 47-character mixed-case/symbol string exactly. Default: 30 ms.
+    event_delay: Duration,
 }
+
+/// Overrides the keyboard event gap in milliseconds (for tuning on slow guests).
+pub const EVENT_DELAY_ENV: &str = "TW_CONSOLE_EVENT_DELAY_MS";
 
 fn button_name(b: MouseButton) -> &'static str {
     match b {
@@ -39,7 +47,17 @@ fn button_name(b: MouseButton) -> &'static str {
 
 impl<S: AsyncRead + AsyncWrite + Send> QmpConsole<S> {
     pub fn new(qmp: Qmp<S>, scratch: PathBuf) -> Self {
-        Self { qmp: Mutex::new(qmp), scratch, size: Mutex::new(None), key_delay: Duration::from_millis(8) }
+        let ms = std::env::var(EVENT_DELAY_ENV).ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v <= 1000).unwrap_or(30);
+        Self { qmp: Mutex::new(qmp), scratch, size: Mutex::new(None), event_delay: Duration::from_millis(ms) }
+    }
+
+    /// Sends keyboard events one at a time, paced so the HID queue never overflows.
+    async fn send_keys_paced(&self, events: Vec<serde_json::Value>) -> TwResult<()> {
+        for event in events {
+            self.send(vec![event]).await?;
+            tokio::time::sleep(self.event_delay).await;
+        }
+        Ok(())
     }
 
     async fn capture(&self) -> TwResult<Screenshot> {
@@ -188,8 +206,7 @@ impl<S: AsyncRead + AsyncWrite + Send + 'static> ComputerControl for QmpConsole<
             if shift {
                 events.push(input::key("shift", false));
             }
-            self.send(events).await?;
-            tokio::time::sleep(self.key_delay).await;
+            self.send_keys_paced(events).await?;
         }
         Ok(())
     }
@@ -199,7 +216,7 @@ impl<S: AsyncRead + AsyncWrite + Send + 'static> ComputerControl for QmpConsole<
         let codes = chord.qcodes();
         let mut events: Vec<_> = codes.iter().map(|c| input::key(c, true)).collect();
         events.extend(codes.iter().rev().map(|c| input::key(c, false)));
-        self.send(events).await
+        self.send_keys_paced(events).await
     }
 }
 
@@ -220,7 +237,9 @@ mod tests {
             Ok(serde_json::json!({}))
         });
         let qmp = Qmp::handshake(client, Duration::from_secs(2)).await.unwrap();
-        (QmpConsole::new(qmp, dir.to_path_buf()), log)
+        let mut console = QmpConsole::new(qmp, dir.to_path_buf());
+        console.event_delay = Duration::ZERO;
+        (console, log)
     }
 
     fn inputs(log: &mock::Log) -> Vec<Value> {

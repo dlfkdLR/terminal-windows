@@ -56,6 +56,8 @@ pub struct LaunchPlan<'a> {
     pub vnc: VncEndpoint,
     pub tpm_socket: Option<PathBuf>,
     pub daemonize: bool,
+    /// Detected QEMU version; selects between old and new option spellings.
+    pub qemu_version: Option<(u32, u32, u32)>,
 }
 
 /// QEMU option values use `,` as a separator; a literal comma is written `,,`.
@@ -155,7 +157,10 @@ pub fn qemu_args(plan: &LaunchPlan<'_>) -> TwResult<Vec<String>> {
         let chardev = format!("socket,id=chrtpm,path={}", escape(sock));
         let device = match c.arch {
             Arch::X86_64 => "tpm-tis,tpmdev=tpm0",
-            Arch::Aarch64 => "tpm-tis-device,tpmdev=tpm0",
+            // ppi=off: the Physical Presence Interface RAM region is not 16 KiB
+            // page aligned and HVF on Apple Silicon rejects mapping it
+            // (HV_BAD_ARGUMENT, measured with QEMU 11.1.3). The TPM itself is unaffected.
+            Arch::Aarch64 => "tpm-tis-device,tpmdev=tpm0,ppi=off",
         };
         push(&["-chardev", &chardev, "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", device]);
     }
@@ -181,7 +186,13 @@ pub fn qemu_args(plan: &LaunchPlan<'_>) -> TwResult<Vec<String>> {
     // Control (Plane H) and display export. Always headless: QEMU cannot hide
     // or re-show its own window at runtime, so viewers attach separately.
     let qmp = plan.qmp.chardev("qmp0", true);
-    push(&["-chardev", &qmp, "-mon", "chardev=qmp0,mode=control"]);
+    push(&["-chardev", &qmp]);
+    // QEMU 11 deprecates `-mon` in favour of `-object monitor-qmp`.
+    if plan.qemu_version.is_some_and(|v| v >= (11, 0, 0)) {
+        push(&["-object", "monitor-qmp,id=mon0,chardev=qmp0"]);
+    } else {
+        push(&["-mon", "chardev=qmp0,mode=control"]);
+    }
     match &plan.vnc {
         VncEndpoint::Unix(path) => {
             let v = format!("unix:{}", escape(path));
@@ -280,6 +291,7 @@ mod tests {
             vnc: VncEndpoint::Unix("/run/tw/vnc.sock".into()),
             tpm_socket: Some("/run/tw/swtpm-ctrl.sock".into()),
             daemonize: true,
+            qemu_version: Some((11, 1, 3)),
         }
     }
 
@@ -300,7 +312,8 @@ mod tests {
         assert!(pair(&args, "-accel", "hvf"));
         assert!(pair(&args, "-cpu", "host"));
         assert!(pair(&args, "-device", "ramfb"));
-        assert!(pair(&args, "-device", "tpm-tis-device,tpmdev=tpm0"));
+        assert!(pair(&args, "-device", "tpm-tis-device,tpmdev=tpm0,ppi=off"));
+        assert!(pair(&args, "-object", "monitor-qmp,id=mon0,chardev=qmp0"));
         assert!(pair(&args, "-device", "nvme,drive=disk0,serial=tw-disk0,bootindex=1"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd0,bus=xhci.0,removable=on,bootindex=0"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd1,bus=xhci.0,removable=on"));
@@ -335,7 +348,9 @@ mod tests {
         p.agent = Endpoint::NamedPipe("tw-dev-agent".into());
         p.vnc = VncEndpoint::LoopbackWithPassword { display: 17 };
         p.daemonize = false;
+        p.qemu_version = Some((9, 2, 0));
         let args = qemu_args(&p).unwrap();
+        assert!(pair(&args, "-mon", "chardev=qmp0,mode=control"), "older QEMU keeps -mon");
         assert!(pair(&args, "-accel", "whpx,kernel-irqchip=off"));
         assert!(pair(&args, "-cpu", "max"));
         assert!(pair(&args, "-chardev", "pipe,id=qmp0,path=tw-dev-qmp"));

@@ -47,18 +47,29 @@ impl QemuBackend {
         }
     }
 
-    fn load_firmware(paths: &MachinePaths) -> TwResult<Firmware> {
+    /// Loads the firmware chosen at creation. Package managers embed versioned
+    /// paths (Homebrew: `Cellar/qemu/<version>/…`), so after a QEMU upgrade the
+    /// recorded file disappears; the same firmware build is then located again
+    /// by file name among the current descriptors and the record is updated.
+    fn load_firmware(&self, paths: &MachinePaths, install: &detect::QemuInstall, arch: Arch) -> TwResult<Firmware> {
         let file = paths.dir.join(FIRMWARE_FILE);
         let text = std::fs::read_to_string(&file).map_err(|e| TwError::io(file.display(), e))?;
         let fw: Firmware = serde_json::from_str(&text).map_err(|e| TwError::invalid(format!("{}: {e}", file.display())))?;
-        if !fw.code.is_file() {
-            return Err(TwError::new(
-                ErrorCode::MissingDependency,
-                format!("firmware {} recorded at creation is missing", fw.code.display()),
-            )
-            .with_hint("Reinstall QEMU, or recreate the VM if QEMU was moved."));
+        if fw.code.is_file() {
+            return Ok(fw);
         }
-        Ok(fw)
+        let current = firmware::discover(&firmware::descriptor_dirs(install.prefix.as_deref()), arch);
+        match relocate(&fw, &current) {
+            Some(moved) => {
+                tracing::info!(from = %fw.code.display(), to = %moved.code.display(), "firmware moved (QEMU upgraded?); using the new location");
+                secure::write_private_atomic(&file, serde_json::to_string_pretty(&moved).unwrap_or_default().as_bytes())?;
+                Ok(moved)
+            }
+            None => {
+                Err(TwError::new(ErrorCode::MissingDependency, format!("firmware {} recorded at creation is missing", fw.code.display()))
+                    .with_hint("Reinstall QEMU. The VM's UEFI variables were created for that firmware build."))
+            }
+        }
     }
 
     fn select_firmware(&self, install: &detect::QemuInstall, arch: Arch) -> TwResult<Firmware> {
@@ -110,6 +121,19 @@ impl QemuBackend {
             }
         }
     }
+}
+
+/// Finds the same firmware build (same code/vars file names and features) at a new location.
+fn relocate(old: &Firmware, current: &[Firmware]) -> Option<Firmware> {
+    current
+        .iter()
+        .find(|f| {
+            f.code.file_name() == old.code.file_name()
+                && f.vars_template.file_name() == old.vars_template.file_name()
+                && f.secure_boot == old.secure_boot
+                && f.requires_smm == old.requires_smm
+        })
+        .cloned()
 }
 
 /// Short stable tag for per-VM pipe names on Windows (pipes are a global namespace).
@@ -260,7 +284,7 @@ impl VirtualizationBackend for QemuBackend {
         self.host.check_guest_arch(config.arch)?;
         let install = detect::find_qemu(&self.host, config.arch).await?;
         let accel = self.accelerator()?;
-        let fw = Self::load_firmware(paths)?;
+        let fw = self.load_firmware(paths, &install, config.arch)?;
         for iso in [&config.install_iso, &config.drivers_iso].into_iter().flatten() {
             if !iso.is_file() {
                 return Err(TwError::not_found(format!("attached media is missing: {}", iso.display()))
@@ -301,6 +325,7 @@ impl VirtualizationBackend for QemuBackend {
             vnc,
             tpm_socket,
             daemonize,
+            qemu_version: install.version,
         };
         let args = cmdline::qemu_args(&plan)?;
         append_log(paths, &format!("{} {}", install.system.display(), args.join(" ")));
@@ -397,6 +422,25 @@ mod tests {
         assert_eq!(map_state("prelaunch"), VmState::Starting);
         assert_eq!(map_state("guest-panicked"), VmState::Error);
         assert_eq!(map_state("shutdown"), VmState::ShuttingDown);
+    }
+
+    #[test]
+    fn firmware_is_relocated_after_upgrade_by_file_name() {
+        let fw = |code: &str, sb: bool| Firmware {
+            description: String::new(),
+            code: code.into(),
+            vars_template: code.replace("code", "vars").into(),
+            format: "raw".into(),
+            secure_boot: sb,
+            enrolled_keys: false,
+            requires_smm: false,
+            source: "/d.json".into(),
+        };
+        let old = fw("/opt/homebrew/Cellar/qemu/11.1.3/share/qemu/edk2-aarch64-code.fd", false);
+        let new = fw("/opt/homebrew/Cellar/qemu/11.2.0/share/qemu/edk2-aarch64-code.fd", false);
+        let other = fw("/x/edk2-aarch64-secure-code.fd", true);
+        assert_eq!(relocate(&old, &[other.clone(), new.clone()]), Some(new));
+        assert_eq!(relocate(&old, &[other]), None);
     }
 
     #[test]
