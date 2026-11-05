@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: target
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-14 = Apple Silicon, macos-13 = Intel, windows-latest = x64.
+        os: [macos-14, macos-13, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: CLI smoke test (no hypervisor expected)
+        shell: bash
+        run: |
+          export TERMINAL_WINDOWS_HOME="$RUNNER_TEMP/twhome"
+          cargo run -q -p tw-cli -- doctor --json > doctor.json
+          cargo run -q -p tw-cli -- ls
+          # A missing VM must fail with exit code 3 (not_found).
+          set +e; cargo run -q -p tw-cli -- status nope; code=$?; set -e
+          test "$code" -eq 3
+
+  windows-agent:
+    name: guest agent (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p tw-agent --target ${{ matrix.target }} -- -D warnings
+      - run: cargo build -p tw-agent --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tw-agent-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/tw-agent.exe
