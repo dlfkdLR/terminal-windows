@@ -73,6 +73,10 @@ $B stop dev                                 # ACPI shutdown request (--force: im
 $B delete dev                               # asks for confirmation (--force skips it)
 ```
 
+### Which terminal?
+
+The viewer needs a terminal with Kitty graphics support: **Ghostty, Kitty or WezTerm** (on macOS: `brew install --cask ghostty`). Apple Terminal and the VS Code / Cursor terminal cannot show images; there, `terminal-windows` still sets up and boots the VM, tells you to open a supported terminal, and `terminal-windows action NAME screenshot` keeps working. tmux and screen block graphics.
+
 ### Viewer keys
 
 Ctrl+G opens a palette of Windows shortcuts (Start, Ctrl+Alt+Del, Alt+Tab, Run, Hangul/English toggle, ...). Ctrl+] leaves the viewer; the VM keeps running.

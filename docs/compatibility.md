@@ -51,6 +51,7 @@ Note: typing during EDK II's 5-second `startup.nsh` countdown right after boot i
 | "Press any key to boot from CD" handling | The prompt is on screen only about 3 s (6.5 s to 9.7 s after start). A first version pressed keys on a fixed schedule and missed it, ending in the UEFI shell. Now detected from raw frames (about 600 lit pixels within the top rows) and a key is pressed only while it is shown ✅ |
 | Bare `terminal-windows` in a pseudo-terminal with an existing running VM | ✅ opens the viewer, Ctrl+] exits, VM keeps running |
 | Bare `terminal-windows` without a terminal | ✅ prints help |
+| `view` / bare `terminal-windows` in a terminal without Kitty graphics (real report: 0.1.2 printed the probe codes as text and failed) | Fixed in 0.1.3: Apple Terminal and the VS Code terminal are recognised from `TERM_PROGRAM` and no probe is sent; `up` still sets up and boots, exits 0 and names an installed supported terminal. ✅ verified in a pseudo-terminal with `TERM_PROGRAM=Apple_Terminal`; other unknown terminals still rely on the live probe and now get the same guidance on failure |
 | Microsoft download step inside `up` | ⏳ not run (needs the browser click); the same code path was measured with `image download` |
 | Homebrew installation step inside `up` | ⏳ not run (QEMU and swtpm were already installed) |
 

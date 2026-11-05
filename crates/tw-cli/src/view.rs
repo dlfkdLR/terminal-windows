@@ -142,6 +142,41 @@ fn spawn_stdin_reader() -> mpsc::Receiver<Vec<u8>> {
     rx
 }
 
+/// Terminals known to ignore or print Kitty graphics sequences. This only avoids spraying
+/// escape codes into them; support elsewhere is still decided by the live probe.
+pub fn known_unsupported_terminal() -> Option<&'static str> {
+    match std::env::var("TERM_PROGRAM").ok().as_deref() {
+        Some("Apple_Terminal") => Some("Apple Terminal"),
+        Some("vscode") => Some("the VS Code / Cursor terminal"),
+        _ => None,
+    }
+}
+
+/// Terminals that can show the viewer and are installed in the usual macOS locations.
+fn installed_graphics_terminals() -> Vec<&'static str> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    ["Ghostty", "kitty", "WezTerm"]
+        .into_iter()
+        .filter(|app| {
+            std::path::Path::new(&format!("/Applications/{app}.app")).is_dir() || home.join(format!("Applications/{app}.app")).is_dir()
+        })
+        .collect()
+}
+
+/// The error for a terminal that cannot show the viewer, with the next step spelled out.
+pub fn unsupported_terminal_error(what: &str) -> TwError {
+    let hint = match installed_graphics_terminals().first() {
+        Some(app) => format!("Open {app} (it is installed) and run `terminal-windows` there. The VM keeps running meanwhile."),
+        None if cfg!(target_os = "macos") => {
+            "Install Ghostty with `brew install --cask ghostty`, open it and run `terminal-windows` there. The VM keeps running meanwhile."
+                .to_string()
+        }
+        None => "Use Ghostty, Kitty or WezTerm. The VM keeps running meanwhile.".to_string(),
+    };
+    TwError::unsupported(format!("{what} cannot show the desktop viewer (it needs Kitty graphics support)"))
+        .with_hint(format!("{hint} Without a graphics terminal you can still use `terminal-windows action NAME screenshot`."))
+}
+
 /// Asks the terminal what it supports. Environment variables are not trusted.
 async fn probe(stdin: &mut mpsc::Receiver<Vec<u8>>, filter: &mut MetricFilter) -> TwResult<Transport> {
     let probe_file = temp_path("probe", 0);
@@ -162,9 +197,7 @@ async fn probe(stdin: &mut mpsc::Receiver<Vec<u8>>, filter: &mut MetricFilter) -
     } else if filter.graphics_replies.get(&31).is_some_and(|r| r == "OK") {
         Ok(Transport::Direct)
     } else {
-        Err(TwError::unsupported("this terminal did not confirm Kitty graphics support").with_hint(
-            "Use Ghostty, Kitty or WezTerm, or keep using `terminal-windows action NAME screenshot`. tmux/screen block graphics.",
-        ))
+        Err(unsupported_terminal_error("this terminal"))
     }
 }
 
@@ -198,6 +231,10 @@ fn spawn_input_worker(console: Arc<dyn InteractiveConsole>, status: mpsc::Sender
 pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err(TwError::invalid("view needs an interactive terminal"));
+    }
+    if let Some(terminal) = known_unsupported_terminal() {
+        // Do not even probe: these terminals would print the query as text.
+        return Err(unsupported_terminal_error(terminal));
     }
     let console: Arc<dyn InteractiveConsole> = Arc::from(service.interactive_console(name).await?);
     let first = console.frame().await?;

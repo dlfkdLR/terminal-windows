@@ -123,7 +123,14 @@ pub async fn run(
     let need_image = !exists && opts.iso.is_none() && cache::find(&cache::images_dir(store.root()), arch, None).is_none();
     let state = if exists { Some(service.status(&name).await?.state) } else { None };
     let need_start = state != Some(VmState::Running) && state != Some(VmState::Paused);
-    let open_viewer = !opts.no_view && !opts.detach && interactive;
+    let mut open_viewer = !opts.no_view && !opts.detach && interactive;
+    if open_viewer {
+        if let Some(terminal) = super::view::known_unsupported_terminal() {
+            // Still do the whole setup; only the final viewer step is skipped.
+            eprintln!("note: {terminal} cannot show the viewer, so setup will stop before opening it.");
+            open_viewer = false;
+        }
+    }
 
     let mut steps: Vec<(&str, String)> = Vec::new();
     if need_qemu || need_swtpm {
@@ -256,10 +263,21 @@ pub async fn run(
     let status = backend.status(&service.load(&name)?, &store.paths(&name)).await?;
     if open_viewer {
         next("Opening the viewer");
-        return super::view::run(service, &name).await;
+        return match super::view::run(service, &name).await {
+            // The VM is up; a terminal that cannot draw the viewer is not a failure of `up`.
+            Err(e) if e.code == ErrorCode::Unsupported => {
+                eprintln!("VM '{name}' is {:?}.\n{e}", status.state);
+                Ok(())
+            }
+            other => other,
+        };
     }
     out.emit(json!({ "vm": name, "state": status.state, "next": format!("terminal-windows view {name}") }), |_| {
-        format!("VM '{name}' is {:?}. Watch and control it with: terminal-windows view {name}", status.state)
+        let mut text = format!("VM '{name}' is {:?}. Watch and control it with: terminal-windows view {name}", status.state);
+        if let Some(terminal) = super::view::known_unsupported_terminal() {
+            text.push_str(&format!("\n{}", super::view::unsupported_terminal_error(terminal)));
+        }
+        text
     });
     Ok(())
 }
