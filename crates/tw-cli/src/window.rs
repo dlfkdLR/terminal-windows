@@ -5,18 +5,18 @@
 //!
 //! macOS and Windows only; elsewhere [`run`] reports that it is unsupported.
 
-use std::sync::Arc;
-use tw_core::control::InteractiveConsole;
 use tw_core::service::VmService;
-use tw_core::{TwError, TwResult, VmName};
+use tw_core::{TwResult, VmName};
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub async fn run(_service: &VmService, _name: &VmName) -> TwResult<()> {
-    Err(TwError::unsupported("the native window viewer is only available on macOS and Windows"))
+    Err(tw_core::TwError::unsupported("the native window viewer is only available on macOS and Windows"))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
+    use std::sync::Arc;
+    use tw_core::control::InteractiveConsole;
     let console: Arc<dyn InteractiveConsole> = Arc::from(service.interactive_console(name).await?);
     // Fail before opening a window if the console does not answer.
     let first = console.frame().await?;
@@ -26,14 +26,16 @@ pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod imp {
-    use super::*;
     use crate::geometry::{blit, fit, to_guest, Rect};
     use std::collections::HashSet;
     use std::num::NonZeroU32;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc;
+    use tw_core::control::InteractiveConsole;
     use tw_core::control::{MouseButton, RawFrame};
+    use tw_core::{TwError, TwResult};
     use winit::application::ApplicationHandler;
     use winit::dpi::LogicalSize;
     use winit::event::{ElementState, MouseButton as WinitButton, MouseScrollDelta, WindowEvent};
