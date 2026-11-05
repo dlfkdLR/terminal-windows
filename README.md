@@ -18,6 +18,14 @@
 - QEMU 7.1+ 와 swtpm (macOS: `brew install qemu swtpm`)
 - Windows 11 설치 ISO: `terminal-windows image download`가 Microsoft에서 받아 검증합니다(아래). Apple Silicon은 **ARM64**.
 
+## 설치
+
+```sh
+curl -fsSL https://github.com/dlfkdLR/terminal-windows/releases/latest/download/get.sh | bash
+```
+
+최신 릴리스를 받아 `SHA256SUMS`로 검증한 뒤 `~/.local/bin/terminal-windows` 하나만 설치합니다(관리자 권한·셸 설정 변경 없음). Windows: `irm https://github.com/dlfkdLR/terminal-windows/releases/latest/download/install.ps1 | iex` (실험적).
+
 ## 빌드와 사용
 
 ```sh

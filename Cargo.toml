@@ -17,7 +17,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
 license = "MIT"
-repository = "https://github.com/OWNER/terminal-windows"
+repository = "https://github.com/dlfkdLR/terminal-windows"
 
 [workspace.dependencies]
 tw-core = { path = "crates/tw-core" }
