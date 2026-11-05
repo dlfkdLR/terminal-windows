@@ -1,62 +1,67 @@
-# 아키텍처
+# Architecture
 
-## 크레이트
+## Crates
 
-| 크레이트 | 책임 | 의존 |
+| Crate | Responsibility | Depends on |
 |---|---|---|
-| `tw-core` | VM 이름, `machine.toml` 모델·검증(Win11 요구사항), 호스트/아키텍처 정책, Store(잠금·원자적 저장·권한), 오류/종료코드, 좌표 변환, `VirtualizationBackend`·`ComputerControl` trait, **`VmService`** | — |
-| `tw-input` | 터미널 입력 파서(upstream 이식), 키 조합 → QEMU qcode / Windows VK, US-ASCII 키 매핑 | — |
-| `tw-protocol` | 게스트 프로토콜 v1: 프레이밍, 상호 인증 핸드셰이크, HMAC 세션, 재생 방지 | — |
-| `tw-qemu` | QEMU 탐지·가속기 실측, 펌웨어 디스크립터, 명령행 생성, QMP 클라이언트, `QemuBackend`, Plane H 콘솔 | core, input |
-| `tw-renderer` | 레이아웃, 응답 필터, Kitty 인코더, 터미널 능력 판정 | — |
-| `tw-mcp` | MCP stdio 서버(`Target` trait, `VmService` 구현) | core |
-| `tw-cli` | `terminal-windows` 바이너리 | 위 전부 |
-| `tw-agent` (`guest/windows-agent`) | Windows 게스트 에이전트 | core, input, protocol |
+| `tw-core` | VM names; `machine.toml` model and validation (Windows 11 requirements); host and architecture policy; store (locks, atomic saves, permissions); errors and exit codes; coordinate conversion; the `VirtualizationBackend`, `ComputerControl` and `InteractiveConsole` traits; **`VmService`** | none |
+| `tw-input` | Terminal input parser (ported from upstream); key chords to QEMU qcodes and Windows VK codes; US-ASCII key mapping | none |
+| `tw-protocol` | Guest protocol v1: framing, mutually authenticated handshake, HMAC session, replay protection | none |
+| `tw-qemu` | QEMU detection and accelerator probing, firmware descriptors, command-line construction, QMP client, `QemuBackend`, Plane H console | core, input |
+| `tw-renderer` | Layout, terminal reply filter, Kitty encoder, terminal capability decision | none |
+| `tw-media` | Microsoft download page and API client, resumable download, SHA-256 verification, ISO cache, Downloads watcher | core |
+| `tw-mcp` | MCP stdio server (`Target` trait, implemented for `VmService`) | core |
+| `tw-cli` | The `terminal-windows` binary: commands, viewer, image and firmware management | all of the above |
+| `tw-agent` (`guest/windows-agent`) | Windows guest agent | core, input, protocol |
 
-원본 프롬프트의 `tw-transport`·`tw-security`는 실익이 작아 각각 `tw-protocol`, `tw-core::secure`로 통합했습니다. `tw-hyperv`는 코드가 생길 때(P3b) 추가합니다(빈 크레이트 금지).
+The original prompt's `tw-transport` and `tw-security` gained too little as separate crates and were folded into `tw-protocol` and `tw-core::secure`. `tw-hyperv` will be added when its code exists (no empty crates).
 
-## 단일 서비스 계층
-
-```text
-tw-cli ─┐
-tw-mcp ─┼─► VmService ─► Arc<dyn VirtualizationBackend> ─► QemuBackend (향후 HyperVBackend)
-viewer ─┘        │
-                 └─► Store
-```
-
-생명주기 규칙(실행 중 삭제 거부, preflight 후 디렉터리 생성, 부분 생성물 보존, 잠금)은 `VmService` 한 곳에만 있습니다.
-
-## 런타임 구성 (QEMU, macOS)
+## One service layer
 
 ```text
-<data>/machines/dev/            machine.toml, disk.qcow2, efivars.fd, firmware.json, tpm/, agent.key, runtime.log, swtpm.log
-<runtime>/  (0700)              qmp.sock, vnc.sock, agent.sock, swtpm-ctrl.sock, qemu.pid
+tw-cli --+
+tw-mcp --+--> VmService --> Arc<dyn VirtualizationBackend> --> QemuBackend (later HyperVBackend)
+viewer --+        |
+                  +--> Store
 ```
 
-`<runtime>`은 기본 `<vm>/run`, Unix 소켓 경로 104바이트 제한을 넘으면 `$TMPDIR/tw-<hash>`로 자동 전환합니다.
+The lifecycle rules (refuse deleting a running VM, run preflight before creating a directory, keep partial artifacts, locking) exist in exactly one place, `VmService`.
+
+## Runtime layout (QEMU, macOS)
+
+```text
+<data>/machines/dev/     machine.toml, disk.qcow2, efivars.fd, firmware.json, tpm/, agent.key, runtime.log, swtpm.log
+<data>/firmware/         managed UEFI firmware and its descriptor (terminal-windows firmware install)
+<data>/images/           verified Windows ISOs and their records
+<runtime>/  (0700)       qmp.sock, qmpv.sock, vnc.sock, agent.sock, swtpm-ctrl.sock, qemu.pid
+```
+
+`<runtime>` is `<vm>/run` by default and falls back to `$TMPDIR/tw-<hash>` when the path would exceed the 104-byte Unix socket limit.
+
+`qmp.sock` serves `action` and MCP; `qmpv.sock` is a second monitor reserved for the interactive viewer, because a QMP socket accepts one client at a time.
 
 `start`:
-1. 설정 로드·잠금 → 상태가 Stopped인지 확인
-2. 기록된 펌웨어(`firmware.json`) 확인, 첨부 미디어 존재 확인
-3. `swtpm socket --tpm2 --terminate` 분리 실행, 제어 소켓 대기
-4. QEMU를 `-daemonize`로 실행 → 초기화 오류를 동기적으로 수집해 `runtime.log`에 기록
-5. QMP `query-status`로 상태 반환
+1. Load the config, take the lock, check that the VM is stopped.
+2. Check the recorded firmware (`firmware.json`; located again by file name after a package upgrade) and the attached media.
+3. Start `swtpm socket --tpm2 --terminate` detached and wait for its control socket.
+4. Start QEMU with `-daemonize`, so initialisation errors are collected synchronously into `runtime.log`.
+5. Return the state from QMP `query-status`.
 
-Windows 호스트는 `-daemonize`가 없으므로 분리 프로세스로 실행하고 QMP(named pipe)를 폴링합니다.
+Windows hosts have no `-daemonize`, so QEMU is started detached and QMP (a named pipe) is polled.
 
-## 제어면
+## Control planes
 
-| | Plane H (구현됨) | Plane G (프로토콜·에이전트 로직 구현, 호스트 연결 미구현) |
+| | Plane H (implemented) | Plane G (protocol and agent logic implemented; host connection not) |
 |---|---|---|
-| 경로 | QMP `screendump`, `input-send-event` | virtio-serial + tw-protocol |
-| 동작 범위 | 펌웨어, 설치, 로그인, UAC 포함 전부 | 로그인된 사용자 데스크톱 |
-| 텍스트 | US 레이아웃 ASCII만 (물리 키) | 유니코드 |
-| 좌표 | 프레임버퍼 픽셀 → 0..32767 | 물리 픽셀 → 0..65535 |
-| 신뢰 | 기준 진실 | guest-reported |
+| Path | QMP `screendump`, `input-send-event` | virtio-serial plus tw-protocol |
+| Reach | firmware, setup, sign-in and UAC included | the signed-in user's desktop |
+| Text | US-layout ASCII only (physical keys) | Unicode |
+| Coordinates | framebuffer pixels to 0..32767 | physical pixels to 0..65535 |
+| Trust | ground truth | guest-reported |
 
-향후 `ComputerControl`을 합성하는 `HybridControl`이 에이전트 연결 시 텍스트/UI 트리는 Plane G, 나머지는 Plane H로 라우팅합니다(P4).
+A future `HybridControl` will route text and UI-tree requests to Plane G and everything else to Plane H when an agent is connected (P4).
 
-## 확장 지점
+## Extension points
 
-- 새 백엔드: `VirtualizationBackend` 구현(`preflight`, `create`, `start`, `stop`, `pause`, `resume`, `status`, `console`, `capabilities`).
-- 새 렌더러 전송: `tw-renderer`에 모듈 추가, `detect::decide`에 판정 추가.
+- New backend: implement `VirtualizationBackend` (`preflight`, `create`, `start`, `stop`, `pause`, `resume`, `status`, `console`, `interactive_console`, `capabilities`).
+- New renderer transport: add a module to `tw-renderer` and a decision to `detect::decide`.

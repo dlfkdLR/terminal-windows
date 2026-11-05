@@ -1,48 +1,52 @@
-# 보안 모델
+# Security model
 
-terminal-windows는 **하드닝된 악성코드 샌드박스가 아닙니다.** 별도 보안 테스트 없이 그렇게 주장하지 않습니다.
+terminal-windows is **not a hardened malware sandbox.** It will not be described as one without dedicated security testing.
 
-## 신뢰 경계
+## Trust boundaries
 
-| 주체 | 신뢰 | 근거 |
+| Party | Trust | Basis |
 |---|---|---|
-| 호스트 사용자, terminal-windows 프로세스 | 신뢰 | VM 소유자 |
-| QEMU/swtpm 프로세스 | 신뢰(같은 사용자) | 호스트가 생성한 인자로만 실행 |
-| 게스트 OS와 그 안의 모든 프로세스 | **비신뢰** | 에이전트 포함 |
-| MCP 클라이언트(에이전트) | 부분 신뢰 | 게스트만 조작 가능, 호스트 데스크톱 접근 없음 |
+| Host user and terminal-windows processes | trusted | the VM owner |
+| QEMU and swtpm processes | trusted (same user) | started only with arguments the host generates |
+| The guest OS and everything in it | **untrusted** | including the agent |
+| MCP client (the agent) | partially trusted | can drive the guest only, no access to the host desktop |
 
-## 기본값
+## Defaults
 
-- 호스트 데스크톱 입력/캡처 API를 사용하지 않음. 모든 입력은 VM의 가상 장치(Plane H) 또는 게스트 내부 에이전트(Plane G)로만.
-- 공유폴더 없음(기능 자체 비활성), 클립보드 공유 없음, 자격증명 전달 없음, 홈 디렉터리 노출 없음.
-- 네트워크 리스너 없음: QMP·VNC·에이전트는 Unix 소켓(디렉터리 0700, 소유·권한·심링크 검사) 또는 Windows named pipe. Windows 호스트의 VNC만 예외적으로 `127.0.0.1` + QEMU VNC 비밀번호를 사용하며, **같은 호스트의 다른 로컬 사용자에게 포트가 보인다**는 점을 문서화합니다.
-- 저장소: 디렉터리 0700, `machine.toml`/`agent.key`/`efivars.fd` 0600, 원자적 쓰기. Windows는 `%LOCALAPPDATA%` 상속 ACL.
-- 게스트 데이터로 호스트 명령을 실행하지 않음. QEMU/swtpm/qemu-img 인자는 검증된 설정과 호스트가 정한 경로로만 생성(`tw-qemu::cmdline`, 셸 미사용, QEMU 옵션 쉼표 이스케이프, swtpm은 쉼표 경로 거부).
-- 리소스 상한: 프레임 크기, 텍스트 32 KiB, 스크롤 ±10000, QMP 라인 1 MiB, QMP 이벤트 버퍼 64, MCP 메시지 4 MiB.
-- 로그: 게스트 문자열·키·비밀번호를 기록하지 않음.
+- Host desktop input and capture APIs are not used. All input goes through the VM's virtual devices (Plane H) or the in-guest agent (Plane G).
+- No shared folders (disabled at the feature level), no clipboard sharing, no credential forwarding, no home directory exposure.
+- No network listeners: QMP, VNC and the agent channel use Unix sockets (directory 0700; owner, mode and symlink checks) or Windows named pipes. Only VNC on Windows hosts is an exception that uses `127.0.0.1` with a QEMU VNC password; it is documented that **other local users on the same host can see the port.**
+- Storage: directories 0700; `machine.toml`, `agent.key` and `efivars.fd` 0600; atomic writes. On Windows the inherited ACL of `%LOCALAPPDATA%`.
+- The viewer's frame files (raw guest screen contents) are written 0600 and removed when the viewer exits.
+- No host command is executed from guest data. QEMU, swtpm and qemu-img arguments come only from validated configuration and host-chosen paths (`tw-qemu::cmdline`; no shell; QEMU option commas escaped; swtpm rejects paths containing commas).
+- Resource bounds: frame size, 32 KiB of text, scroll within ±10000, 1 MiB per QMP line, 64 buffered QMP events, 4 MiB per MCP message, 64 queued viewer inputs.
+- Logs never contain guest strings, keys or passwords.
+- Downloaded media and firmware are verified against SHA-256 values published by their source (Microsoft's page for ISOs; `SHA256SUMS` of the release for firmware) before they are used.
 
-## 네트워크 모드
+## Network modes
 
-| 모드 | 의미 |
+| Mode | Meaning |
 |---|---|
-| `nat` (기본) | QEMU 사용자 모드 NAT. 게스트는 인터넷에 접근 가능하며 **호스트/LAN 서비스에 도달할 수 있음. 격리가 아님.** |
-| `offline` (`--offline`) | 게스트 NIC 없음 |
+| `nat` (default) | QEMU user-mode NAT. The guest can reach the internet and **may reach host and LAN services. This is not isolation.** |
+| `offline` (`--offline`) | no guest NIC |
 
-## Windows 보안 경계와의 관계
+## Relation to Windows security boundaries
 
-- UAC Secure Desktop, 잠금 화면, Ctrl+Alt+Del은 게스트 에이전트로 조작하지 않음(불가능하며 우회 시도 안 함).
-- 하이퍼바이저 콘솔(Plane H)은 VM의 물리 키보드/모니터와 같습니다. VM 소유자가 직접 쓰는 것은 정상이지만, **에이전트(MCP)가 로그인·UAC·자격증명 창을 조작하는 것은 위험**하므로 MCP 지침은 해당 화면에서 사용자에게 넘기도록 합니다. 에이전트가 연결되면 `secure_desktop` 상태를 근거로 MCP가 자동 거부하는 정책을 P6에서 구현합니다(현재 Plane H만으로는 화면 상태를 판별할 수 없음 — 미구현으로 명시).
-- 에이전트는 서비스가 아닌 사용자 세션 프로세스 + 상시 트레이 아이콘. 사용자가 확인·중지·제거 가능(P4).
-- Windows 정품인증, TPM/Secure Boot/RAM 요구사항, 네트워크 OOBE 요구사항을 우회하는 기능 없음.
+- The UAC secure desktop, the lock screen and Ctrl+Alt+Del cannot be driven by the guest agent (impossible, and no bypass is attempted).
+- The hypervisor console (Plane H) is equivalent to the VM's physical keyboard and monitor. That is normal for the VM owner, but **an agent (MCP) operating sign-in, UAC or credential dialogs is risky**, so the MCP instructions tell agents to hand those screens to the user. Automatic refusal based on the `secure_desktop` state is planned for P6; it is not implemented yet because Plane H alone cannot tell which screen is showing.
+- The agent is a user-session process with an always-visible tray icon, not a service. The user can inspect, stop and uninstall it (P4).
+- No feature bypasses Windows activation or the TPM, Secure Boot, RAM or network-at-OOBE requirements. The Secure Boot firmware shipped here makes the VM genuinely Secure Boot capable; it does not fake the check.
 
-## 위협별 대응
+## Threats and responses
 
-| 위협 | 대응 |
+| Threat | Response |
 |---|---|
-| 게스트 → 호스트 명령 주입 | 프로토콜에 실행 액션 없음, 알 수 없는 액션 역직렬화 거부 |
-| 게스트가 거대한 프레임으로 메모리 고갈 | 길이 검사 후 할당 |
-| 다른 로컬 사용자가 QMP 접속 | 0700 런타임 디렉터리, 소유·권한 검증 |
-| 심링크로 런타임 디렉터리 탈취 | `symlink_metadata` 검사, 그룹/기타 권한 있으면 거부 |
-| 재생/반사/순서 변경 | 방향 포함 HMAC, 엄격한 시퀀스 |
-| 게스트 악성코드의 에이전트 사칭 | 완전 방지 불가. 기준 진실은 Plane H, 보고값 표시 |
-| 이름을 통한 경로 탈출 | `VmName` 검증(`..`, `/`, `\`, 예약 장치명 거부), 디렉터리명-설정명 일치 검사 |
+| Guest injects host commands | No execute action in the protocol; unknown actions rejected at deserialisation |
+| Guest exhausts memory with huge frames | Length checked before allocation |
+| Another local user connects to QMP | 0700 runtime directory with owner and mode verification |
+| Symlink swap of the runtime directory | `symlink_metadata` check; refused if group or others have access |
+| Replay, reflection, reordering | Direction-bound HMAC and strict sequence numbers |
+| Malware in the guest impersonating the agent | Cannot be fully prevented. Ground truth is Plane H; reported values are labelled |
+| Path escape through VM names | `VmName` validation (`..`, `/`, `\` and reserved device names rejected), directory name must match the config name |
+| Other local users reading viewer frame files | Files created 0600, deleted on exit |
+| Tampered ISO or firmware download | SHA-256 verification against the publisher's values |
