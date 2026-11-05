@@ -34,7 +34,7 @@ pub const PALETTE: &[(&str, &str)] = &[
     ("win+e", "Explorer"),
     ("alt+f4", "Close"),
     ("ctrl+shift+esc", "Task Manager"),
-    ("hangul", "한/영"),
+    ("hangul", "Han/Eng"),
     ("win+d", "Desktop"),
 ];
 
@@ -294,7 +294,7 @@ pub async fn run(service: &VmService, name: &VmName) -> TwResult<()> {
                         }
                         TerminalEvent::Text(t) => {
                             if !t.is_ascii() {
-                                message = "non-ASCII text needs the guest agent; switch the guest IME with Ctrl+G → 8 (한/영) and type on an English layout".into();
+                                message = "non-ASCII text needs the guest agent; switch the guest IME with Ctrl+G, then 8 (Han/Eng key) and type on an English layout".into();
                                 force = true;
                             } else if input.try_send(InputJob::Text(t)).is_err() {
                                 message = "input is busy; wait a moment".into();

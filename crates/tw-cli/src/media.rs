@@ -162,76 +162,88 @@ pub async fn run(command: ImageCommand, store: &Store, host: HostInfo, out: &Out
         }
         ImageCommand::Download { arch, language, no_browser, wait_minutes } => {
             let arch = arch_or_host(arch, host)?;
-            let client = Client::new()?;
-            let page = client.page(arch).await?;
-            let canonical = page
-                .hashes
-                .iter()
-                .find(|h| microsoft::same_language(&h.language, &language))
-                .map(|h| h.language.clone())
-                .ok_or_else(|| {
-                    TwError::invalid(format!("Microsoft publishes no {language:?} image"))
-                        .with_hint(format!("Available: {}", page.hashes.iter().map(|h| h.language.as_str()).collect::<Vec<_>>().join(", ")))
-                })?;
-            if let Some(c) = cache::find(&dir, arch, Some(&canonical)).filter(|c| c.record.version == page.version) {
-                out.emit(image_json(&c), |_| format!("Already cached and verified: {}", c.path.display()));
-                return Ok(());
-            }
-            eprintln!("{} — Windows 11 {} {} ({canonical})", page.edition_name, page.version.as_deref().unwrap_or(""), arch.windows_name());
-
-            let session = microsoft::session_id();
-            let skus = client.skus(&page, &session).await?;
-            let sku = skus
-                .iter()
-                .find(|s| microsoft::same_language(&s.language, &canonical))
-                .ok_or_else(|| TwError::backend(format!("no download SKU for {canonical}")))?;
-            let cached = match client.link(&page, sku, &session).await? {
-                LinkOutcome::Granted(url) => {
-                    tw_core::secure::create_private_dir(&dir)?;
-                    let dest = dir.join(cache::file_name(page.version.as_deref(), &canonical, arch));
-                    let mut progress = Progress::new("Downloading");
-                    tw_media::download::download(client.http(), &url, &dest, |d, t| progress.update(d, t)).await?;
-                    match verify_official(&client, &page, &dest).await {
-                        Ok((sha, lang)) => cache::register(&dir, &dest, record(&page, &lang, sha, "microsoft-download"), Transfer::Move)?,
-                        Err(e) => {
-                            let _ = std::fs::remove_file(&dest);
-                            return Err(e);
-                        }
-                    }
-                }
-                LinkOutcome::Rejected(reason) => {
-                    eprintln!("Microsoft declined the automated download request: {reason}");
-                    eprintln!("terminal-windows does not work around Microsoft's bot protection. Finishing in your browser instead:");
-                    let downloads =
-                        dirs::download_dir().ok_or_else(|| TwError::new(ErrorCode::Io, "cannot determine the Downloads folder"))?;
-                    if no_browser || !open_browser(&page.url) {
-                        eprintln!("  Open: {}", page.url);
-                    } else {
-                        eprintln!("  Opened {}", page.url);
-                    }
-                    eprintln!("  1. Select \"{}\" and click Download Now", page.edition_name);
-                    eprintln!("  2. Choose the language \"{canonical}\" and click Confirm");
-                    eprintln!("  3. Click the 64-bit Download button and save to {}", downloads.display());
-                    eprintln!("Waiting for the download to finish (up to {wait_minutes} minutes; Ctrl+C to stop)...");
-                    let found: PathBuf = tw_media::watch::wait_for_new_iso(
-                        &downloads,
-                        Duration::from_secs(wait_minutes * 60),
-                        Duration::from_secs(5),
-                        Duration::from_secs(2),
-                    )
-                    .await?;
-                    eprintln!("Found {}", found.display());
-                    let (sha, lang) = verify_official(&client, &page, &found).await?;
-                    cache::register(&dir, &found, record(&page, &lang, sha, "browser-download"), Transfer::Move)?
-                }
-            };
+            let (cached, already) = download_image(store, arch, &language, no_browser, wait_minutes).await?;
             out.emit(image_json(&cached), |_| {
-                format!(
-                    "Verified against Microsoft's published SHA-256 and cached:\n{}\nCreate a VM with: terminal-windows create NAME",
-                    cached.path.display()
-                )
+                if already {
+                    format!("Already cached and verified: {}", cached.path.display())
+                } else {
+                    format!(
+                        "Verified against Microsoft's published SHA-256 and cached:\n{}\nCreate a VM with: terminal-windows create NAME",
+                        cached.path.display()
+                    )
+                }
             });
         }
     }
     Ok(())
+}
+
+/// Downloads (or finds in the cache) the official Windows 11 image for `arch` and `language`.
+/// Returns the image and whether it was already cached.
+pub async fn download_image(
+    store: &Store,
+    arch: Arch,
+    language: &str,
+    no_browser: bool,
+    wait_minutes: u64,
+) -> TwResult<(CachedImage, bool)> {
+    let dir = cache::images_dir(store.root());
+    let client = Client::new()?;
+    let page = client.page(arch).await?;
+    let canonical =
+        page.hashes.iter().find(|h| microsoft::same_language(&h.language, language)).map(|h| h.language.clone()).ok_or_else(|| {
+            TwError::invalid(format!("Microsoft publishes no {language:?} image"))
+                .with_hint(format!("Available: {}", page.hashes.iter().map(|h| h.language.as_str()).collect::<Vec<_>>().join(", ")))
+        })?;
+    if let Some(c) = cache::find(&dir, arch, Some(&canonical)).filter(|c| c.record.version == page.version) {
+        return Ok((c, true));
+    }
+    eprintln!("{} — Windows 11 {} {} ({canonical})", page.edition_name, page.version.as_deref().unwrap_or(""), arch.windows_name());
+
+    let session = microsoft::session_id();
+    let skus = client.skus(&page, &session).await?;
+    let sku = skus
+        .iter()
+        .find(|s| microsoft::same_language(&s.language, &canonical))
+        .ok_or_else(|| TwError::backend(format!("no download SKU for {canonical}")))?;
+    let cached = match client.link(&page, sku, &session).await? {
+        LinkOutcome::Granted(url) => {
+            tw_core::secure::create_private_dir(&dir)?;
+            let dest = dir.join(cache::file_name(page.version.as_deref(), &canonical, arch));
+            let mut progress = Progress::new("Downloading");
+            tw_media::download::download(client.http(), &url, &dest, |d, t| progress.update(d, t)).await?;
+            match verify_official(&client, &page, &dest).await {
+                Ok((sha, lang)) => cache::register(&dir, &dest, record(&page, &lang, sha, "microsoft-download"), Transfer::Move)?,
+                Err(e) => {
+                    let _ = std::fs::remove_file(&dest);
+                    return Err(e);
+                }
+            }
+        }
+        LinkOutcome::Rejected(reason) => {
+            eprintln!("Microsoft declined the automated download request: {reason}");
+            eprintln!("terminal-windows does not work around Microsoft's bot protection. Finishing in your browser instead:");
+            let downloads = dirs::download_dir().ok_or_else(|| TwError::new(ErrorCode::Io, "cannot determine the Downloads folder"))?;
+            if no_browser || !open_browser(&page.url) {
+                eprintln!("  Open: {}", page.url);
+            } else {
+                eprintln!("  Opened {}", page.url);
+            }
+            eprintln!("  1. Select \"{}\" and click Download Now", page.edition_name);
+            eprintln!("  2. Choose the language \"{canonical}\" and click Confirm");
+            eprintln!("  3. Click the 64-bit Download button and save to {}", downloads.display());
+            eprintln!("Waiting for the download to finish (up to {wait_minutes} minutes; Ctrl+C to stop)...");
+            let found: PathBuf = tw_media::watch::wait_for_new_iso(
+                &downloads,
+                Duration::from_secs(wait_minutes * 60),
+                Duration::from_secs(5),
+                Duration::from_secs(2),
+            )
+            .await?;
+            eprintln!("Found {}", found.display());
+            let (sha, lang) = verify_official(&client, &page, &found).await?;
+            cache::register(&dir, &found, record(&page, &lang, sha, "browser-download"), Transfer::Move)?
+        }
+    };
+    Ok((cached, false))
 }

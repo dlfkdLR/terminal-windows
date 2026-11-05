@@ -15,6 +15,7 @@ use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
 mod firmware_cmd;
 mod media;
+mod up;
 mod view;
 
 #[derive(Parser, Debug)]
@@ -27,7 +28,7 @@ struct Cli {
     #[arg(long, global = true, default_value = "warn")]
     log: String,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -70,22 +71,27 @@ enum Command {
     },
     /// Boot a VM (headless; view it with `view` or control it with `action`).
     Start {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     /// Request a graceful shutdown, or power off with --force.
     Stop {
+        #[arg(default_value = "default")]
         name: VmName,
         /// Immediate power-off. Unsaved guest work can be lost.
         #[arg(long)]
         force: bool,
     },
     Pause {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     Resume {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     Status {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     /// List VMs.
@@ -93,14 +99,17 @@ enum Command {
     Ls,
     /// View and control the desktop inside the terminal (Kitty graphics: Ghostty, Kitty, WezTerm).
     View {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     /// Open a native viewer window (not implemented yet).
     Show {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     /// Close the native viewer window (not implemented yet).
     Hide {
+        #[arg(default_value = "default")]
         name: VmName,
     },
     /// Delete a stopped VM and all its data.
@@ -112,12 +121,14 @@ enum Command {
     },
     /// Print the end of the hypervisor log.
     Logs {
+        #[arg(default_value = "default")]
         name: VmName,
         #[arg(long, default_value_t = 100)]
         lines: usize,
     },
     /// Show a VM's configuration, or change it while stopped.
     Config {
+        #[arg(default_value = "default")]
         name: VmName,
         /// Detach the installation and driver ISOs (after Windows is installed).
         #[arg(long)]
@@ -136,8 +147,38 @@ enum Command {
         #[arg(long)]
         config: bool,
     },
-    /// Guided create → start → view flow (not implemented yet).
-    Up,
+    /// Guided setup: check prerequisites, get firmware and Windows, create, boot and view.
+    /// Running `terminal-windows` with no command in a terminal does the same.
+    Up {
+        /// VM name. Defaults to "default", or to the only VM if there is just one.
+        name: Option<VmName>,
+        /// Use this Windows ISO instead of downloading one from Microsoft.
+        #[arg(long)]
+        iso: Option<PathBuf>,
+        /// Windows language to download (Microsoft's names, e.g. Korean). Default: from the system locale.
+        #[arg(long)]
+        language: Option<String>,
+        /// Create and boot the VM, then print its state instead of opening the viewer.
+        #[arg(long)]
+        no_view: bool,
+        /// Same as --no-view.
+        #[arg(long)]
+        detach: bool,
+        /// Show the steps that would be taken, without changing anything.
+        #[arg(long)]
+        plan: bool,
+        /// Do not ask before installing prerequisites with Homebrew.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        cpus: Option<u32>,
+        /// Memory in GiB for a new VM.
+        #[arg(long)]
+        memory: Option<u64>,
+        /// Disk size in GiB for a new VM.
+        #[arg(long)]
+        disk: Option<u64>,
+    },
     /// Computer-use actions on a running VM.
     Action {
         name: VmName,
@@ -311,7 +352,47 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
     let backend: Arc<dyn VirtualizationBackend> = Arc::new(tw_qemu::QemuBackend::new(host, store.root().join("firmware")));
     let service = VmService::new(store.clone(), backend.clone());
 
-    match cli.command {
+    let command = match cli.command {
+        Some(command) => command,
+        // `terminal-windows` alone: guided setup in a terminal, help otherwise (like terminal-mac).
+        None if std::io::stdin().is_terminal() => Command::Up {
+            name: None,
+            iso: None,
+            language: None,
+            no_view: false,
+            detach: false,
+            plan: false,
+            yes: false,
+            cpus: None,
+            memory: None,
+            disk: None,
+        },
+        None => {
+            use clap::CommandFactory;
+            let _ = Cli::command().print_help();
+            return Ok(());
+        }
+    };
+    let mut command = command;
+    // Commands that take a VM name default to "default", or to the only VM that exists.
+    if let Command::Start { name }
+    | Command::Stop { name, .. }
+    | Command::Pause { name }
+    | Command::Resume { name }
+    | Command::Status { name }
+    | Command::View { name }
+    | Command::Show { name }
+    | Command::Hide { name }
+    | Command::Logs { name, .. }
+    | Command::Config { name, .. }
+    | Command::Mcp { name, .. } = &mut command
+    {
+        if name.as_str() == "default" {
+            *name = up::resolve_default_name(&store, None)?;
+        }
+    }
+
+    match command {
         Command::Doctor => {
             let caps = backend.capabilities().await;
             let qemu = match host.arch {
@@ -431,7 +512,10 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
         }
         Command::View { name } => view::run(&service, &name).await?,
         Command::Show { .. } | Command::Hide { .. } => return Err(not_implemented("show/hide", "P5")),
-        Command::Up => return Err(not_implemented("up", "P5/P7")),
+        Command::Up { name, iso, language, no_view, detach, plan, yes, cpus, memory, disk } => {
+            let options = up::UpOptions { name, iso, language, no_view, detach, plan, yes, cpus, memory_gib: memory, disk_gib: disk };
+            up::run(options, &store, &service, &backend, host, out).await?
+        }
         Command::Delete { name, force } => {
             if !store.paths(&name).dir.exists() {
                 return Err(TwError::not_found(format!("VM '{name}' does not exist")));
@@ -572,6 +656,11 @@ mod tests {
     #[test]
     fn parses_spec_commands() {
         for args in [
+            vec!["terminal-windows"],
+            vec!["terminal-windows", "up"],
+            vec!["terminal-windows", "up", "--plan", "--yes", "--language", "Korean", "work"],
+            vec!["terminal-windows", "start"],
+            vec!["terminal-windows", "view"],
             vec!["terminal-windows", "doctor"],
             vec!["terminal-windows", "image", "list"],
             vec!["terminal-windows", "firmware", "install", "--from", "/tmp/fw"],
