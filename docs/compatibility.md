@@ -10,7 +10,7 @@
 | 4. Windows 설치 | ⏳ | ⏳ | ⏳ | ⏳ |
 | 5. 에이전트 연결 | ⏳ | ⏳ | ⏳ | ⏳ |
 | 6. 터미널 뷰어 | ⏳ (뷰어 미구현) | ⏳ | ⏳ | ⏳ |
-| 7. MCP 제어 | ⏳ (서버는 가짜 대상으로 테스트됨) | ⏳ | ⏳ | ⏳ |
+| 7. MCP 제어 | 🟡 2026-11-05 실제 VM(UEFI)에 stdio로 호출 성공. Claude Code/Codex 클라이언트 연동은 ⏳ | ⏳ | ⏳ | ⏳ |
 | 8. E2E | ⏳ | ⏳ | ⏳ | ⏳ |
 
 ## 실측 기록: Apple Silicon 첫 부팅 (2026-11-05)
@@ -21,7 +21,7 @@
 |---|---|
 | `doctor` HVF probe | ✅ supported (실제 기동 확인) |
 | `create` (qcow2, efivars, TPM 상태 디렉터리, 에이전트 키) | ✅ |
-| `start`: HVF + `virt` + ramfb + NVMe + qemu-xhci + swtpm TPM + virtio-serial + NAT + QMP + VNC(unix) | ✅ `running` (아래 두 가지 수정 후) |
+| `start`: HVF + `virt` + ramfb + NVMe + qemu-xhci + swtpm TPM + virtio-serial + NAT + QMP + VNC(unix) | ✅ `running` (아래 수정 1·2 적용 후) |
 | UEFI 화면 캡처 (`action screenshot`, QMP screendump PNG) | ✅ 800×600, EDK II 셸, NVMe `BLK0` 인식 |
 | 키보드 입력 (`action type`/`key`, QMP qcode) | ✅ 47자 대소문자·기호 문자열 정확히 입력 (이벤트 간격 30 ms) |
 | `pause` / 일시정지 중 action 거부 / `resume` | ✅ (거부 시 종료 코드 6) |
