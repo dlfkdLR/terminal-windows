@@ -33,6 +33,7 @@ The lifecycle rules (refuse deleting a running VM, run preflight before creating
 <data>/machines/dev/     machine.toml, disk.qcow2, efivars.fd, firmware.json, tpm/, agent.key, runtime.log, swtpm.log
 <data>/firmware/         managed UEFI firmware and its descriptor (terminal-windows firmware install)
 <data>/images/           verified Windows ISOs and their records
+<data>/TerminalWindows.app/  macOS only: bundle (Info.plist, icon, binary copy) the native viewer window runs from, so the Dock shows a proper name and icon
 <runtime>/  (0700)       qmp.sock, qmpv.sock, vnc.sock, agent.sock, swtpm-ctrl.sock, qemu.pid
 ```
 

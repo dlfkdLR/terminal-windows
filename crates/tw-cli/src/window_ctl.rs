@@ -68,6 +68,16 @@ pub async fn show(service: &VmService, name: &VmName) -> TwResult<Shown> {
         return Ok(Shown { pid, already_open: true });
     }
     let exe = std::env::current_exe().map_err(|e| TwError::io("current executable", e))?;
+    // On macOS the window runs from a small .app bundle: a bare executable would get the generic
+    // black "exec" Dock icon and no proper name.
+    #[cfg(target_os = "macos")]
+    let exe = match crate::app_bundle::ensure(service.store().root(), &exe, env!("CARGO_PKG_VERSION")) {
+        Ok(inner) => inner,
+        Err(e) => {
+            tracing::warn!("cannot create the app bundle ({e}); the window will have a generic icon");
+            exe
+        }
+    };
     let log_path = log_file(service, name);
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| TwError::io(log_path.display(), e))?;
     let mut command = Command::new(exe);

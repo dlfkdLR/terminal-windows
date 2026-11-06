@@ -13,6 +13,8 @@ use tw_core::service::VmService;
 use tw_core::store::Store;
 use tw_core::{ErrorCode, TwError, TwResult, VmName};
 
+#[cfg(target_os = "macos")]
+mod app_bundle;
 mod bootassist;
 mod firmware_cmd;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
