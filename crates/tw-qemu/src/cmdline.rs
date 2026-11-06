@@ -183,8 +183,10 @@ pub fn qemu_args(plan: &LaunchPlan<'_>) -> TwResult<Vec<String>> {
         NetworkMode::Nat => {
             let nic = match c.arch {
                 Arch::X86_64 => "e1000e,netdev=net0",
-                // Requires the virtio-win ARM64 driver (attach with --drivers-iso).
-                Arch::Aarch64 => "virtio-net-pci,netdev=net0",
+                // A USB network device (RNDIS). Windows ARM64 has no inbox driver for virtio-net, which
+                // left OOBE stuck on "Connect to a network" (error 0xe0000100, measured 2026-11-05), but
+                // the 26H2 ARM64 image ships netrndis.inf / rndismp6.sys (checked inside install.wim).
+                Arch::Aarch64 => "usb-net,netdev=net0,bus=xhci.0",
             };
             push(&["-netdev", "user,id=net0", "-device", nic]);
         }
@@ -338,7 +340,8 @@ mod tests {
         assert!(pair(&args, "-device", "nvme,drive=disk0,serial=tw-disk0,bootindex=1"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd0,bus=xhci.0,removable=on,bootindex=0"));
         assert!(pair(&args, "-device", "usb-storage,drive=cd1,bus=xhci.0,removable=on"));
-        assert!(pair(&args, "-device", "virtio-net-pci,netdev=net0"));
+        assert!(pair(&args, "-device", "usb-net,netdev=net0,bus=xhci.0"), "ARM64 uses the USB network device with an inbox Windows driver");
+        assert!(!joined(&args).contains("virtio-net"), "no virtio-net: Windows ARM64 has no inbox driver for it");
         assert!(pair(&args, "-uuid", &c.smbios_uuid));
         // Comma in the ISO path is escaped for QEMU's option parser.
         assert!(joined(&args).contains("file=/media/Win11,,ARM64.iso"));
