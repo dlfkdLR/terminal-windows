@@ -90,7 +90,7 @@ Windows is often at 125% or 150% scaling. Screenshot pixels, logical coordinates
 
 - Windows ARM64 effectively has no virtio-gpu display driver, so **ramfb (fixed resolution)** is used. "Dynamic resolution adaptation" cannot be met on ARM64 (the resolution is fixed by the firmware GOP).
 - The disk is **NVMe**, which has an inbox driver (no extra driver needed during setup).
-- The network card is a **USB network device (RNDIS)**, not virtio-net: Windows ARM64 has no inbox virtio-net driver, which left OOBE stuck on "Connect to a network" (error 0xe0000100). The Windows 11 26H2 ARM64 image ships `netrndis.inf` (checked inside `install.wim`), so nothing has to be downloaded. `--drivers-iso` remains available for other drivers.
+- The network card is **virtio-net-pci** with the Microsoft-signed **NetKVM** ARM64 driver (virtio-win, BSD-3-Clause) delivered in `$WinPEDriver$` on the answer-file CD. Windows ARM64 has no inbox driver for any emulable NIC, which left OOBE stuck on "Connect to a network" (error 0xe0000100). A USB RNDIS NIC was tried first and does not work: QEMU's RNDIS descriptor makes Windows bind the generic COM-port driver (`usbser`). Without `--unattended` (no answer file) the driver is not delivered; use OOBE's driver-install picker with `--drivers-iso`.
 - Microsoft's officially supported Windows 11 virtualization on Apple Silicon is Parallels and VMware Fusion. The QEMU path works technically but is **not a Microsoft-supported configuration**, and the documentation says so.
 - x64 Windows on Apple Silicon (TCG emulation) is **refused**, keeping the original requirement.
 

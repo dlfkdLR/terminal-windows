@@ -358,7 +358,12 @@ impl VirtualizationBackend for QemuBackend {
             if config.unattended && tw_core::install::unattended_allowed(config.install_iso.is_some(), &paths.efivars, &paths.disk) {
                 let culture = config.windows_language.as_deref().and_then(tw_core::unattend::culture_for_language);
                 let xml = tw_core::unattend::AnswerFile { arch: config.arch, culture, edition: "Windows 11 Pro" }.to_xml();
-                let iso = tw_core::iso9660::single_file_iso("UNATTEND", "AUTOUNATTEND.XML", xml.as_bytes()).map_err(TwError::backend)?;
+                let mut files: Vec<(String, &[u8])> = vec![("AUTOUNATTEND.XML".to_string(), xml.as_bytes())];
+                if config.arch == tw_core::host::Arch::Aarch64 && config.network == tw_core::model::NetworkMode::Nat {
+                    files.extend(tw_core::drivers::netkvm_arm64_files());
+                }
+                let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (n.as_str(), *b)).collect();
+                let iso = tw_core::iso9660::build("UNATTEND", &refs).map_err(TwError::backend)?;
                 secure::write_private_atomic(&unattend_path, &iso)?;
                 Some(unattend_path.as_path())
             } else {

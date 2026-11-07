@@ -1,0 +1,14 @@
+Red Hat VirtIO network driver (NetKVM) for Windows 11 ARM64, unmodified.
+
+Source:   virtio-win-0.1.302.iso, directory NetKVM/w11/ARM64
+          https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso
+ISO SHA-256: 303f7ae40dad495d6ae474fdc571df58958a4dbc5c37a522d80f9a203867949d
+Driver:   DriverVer 07/22/2026, 100.103.104.30200 (Microsoft-signed catalog: netkvm.cat)
+License:  BSD-3-Clause, see LICENSE-virtio-win.txt (redistribution in binary form permitted when
+          the copyright notice and disclaimer are reproduced, which this directory does).
+
+Files (SHA-256):
+4b56c2e399c5b1943a1e8bae5b4907ca06ebc76053df5cfdc628bcf68fa371fd  netkvm.inf
+118e6c7cad6f09b406f2b58dc9592ccbe1e803e751e5577b66ac180dbeacaabb  netkvm.sys
+c5fa8b6790e9c0dac8fd8848c617292230ecaba29a03cf1ad25bdf243970a722  netkvm.cat
+6abd66a785e0edd00ce91c09b207d3e67f5567d32cadd44c7d3363a9b1381a37  netkvmp.exe

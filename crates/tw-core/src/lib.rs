@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod control;
 pub mod coords;
+pub mod drivers;
 pub mod error;
 pub mod host;
 pub mod install;
