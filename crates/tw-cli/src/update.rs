@@ -22,6 +22,7 @@ pub fn latest_tag(json: &str) -> Option<String> {
 }
 
 /// The install prefix when `exe` is `<prefix>/bin/terminal-windows`; None for a source build.
+#[cfg_attr(not(unix), allow(dead_code))] // only the Unix installer uses it
 pub fn install_prefix(exe: &Path) -> Option<PathBuf> {
     let bin = exe.parent()?;
     (bin.file_name()? == "bin" && exe.file_stem()? == "terminal-windows").then(|| bin.parent().map(Path::to_path_buf))?
