@@ -352,25 +352,42 @@ impl VirtualizationBackend for QemuBackend {
             Endpoint::Unix(paths.qmp_view_socket())
         });
         let daemonize = cfg!(unix);
-        // Automatic installation: only for a VM whose disk is virgin and that has no Windows yet.
+        // Setup media CD. The wipe-capable answer file only for a VM whose disk is virgin and that has
+        // no Windows yet. The NetKVM driver folder (`$WinPEDriver$`, picked up by Setup with or
+        // without an answer file) whenever the installer is still attached on an ARM64 NAT VM, so a
+        // manual installation, and OOBE's own driver picker, work too.
         let unattend_path = paths.unattend_iso();
-        let unattend_iso =
-            if config.unattended && tw_core::install::unattended_allowed(config.install_iso.is_some(), &paths.efivars, &paths.disk) {
+        let tw_core::install::SetupMedia { answer_file, drivers } = tw_core::install::setup_media(
+            config.unattended,
+            config.install_iso.is_some(),
+            &paths.efivars,
+            &paths.disk,
+            config.arch,
+            config.network,
+        );
+        let unattend_iso = if answer_file || drivers {
+            let xml = if answer_file {
                 let culture = config.windows_language.as_deref().and_then(tw_core::unattend::culture_for_language);
-                let xml = tw_core::unattend::AnswerFile { arch: config.arch, culture, edition: "Windows 11 Pro" }.to_xml();
-                let mut files: Vec<(String, &[u8])> = vec![("AUTOUNATTEND.XML".to_string(), xml.as_bytes())];
-                if config.arch == tw_core::host::Arch::Aarch64 && config.network == tw_core::model::NetworkMode::Nat {
-                    files.extend(tw_core::drivers::netkvm_arm64_files());
-                }
-                let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (n.as_str(), *b)).collect();
-                let iso = tw_core::iso9660::build("UNATTEND", &refs).map_err(TwError::backend)?;
-                secure::write_private_atomic(&unattend_path, &iso)?;
-                Some(unattend_path.as_path())
+                Some(tw_core::unattend::AnswerFile { arch: config.arch, culture, edition: "Windows 11 Pro" }.to_xml())
             } else {
-                // A stale answer file must never stay around where it could wipe an installed disk.
-                let _ = std::fs::remove_file(&unattend_path);
                 None
             };
+            let mut files: Vec<(String, &[u8])> = Vec::new();
+            if let Some(xml) = &xml {
+                files.push(("AUTOUNATTEND.XML".to_string(), xml.as_bytes()));
+            }
+            if drivers {
+                files.extend(tw_core::drivers::netkvm_arm64_files());
+            }
+            let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, b)| (n.as_str(), *b)).collect();
+            let iso = tw_core::iso9660::build("UNATTEND", &refs).map_err(TwError::backend)?;
+            secure::write_private_atomic(&unattend_path, &iso)?;
+            Some(unattend_path.as_path())
+        } else {
+            // A stale answer file must never stay around where it could wipe an installed disk.
+            let _ = std::fs::remove_file(&unattend_path);
+            None
+        };
         let plan = LaunchPlan {
             config,
             accelerator: accel,

@@ -28,11 +28,22 @@ fn is_our_viewer(pid: u32) -> bool {
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains("terminal-windows"))
     } else {
-        Command::new("ps").args(["-p", &pid.to_string(), "-o", "command="]).output().is_ok_and(|o| {
-            let text = String::from_utf8_lossy(&o.stdout);
-            text.contains("terminal-windows") && text.split_whitespace().any(|w| w == "window")
-        })
+        Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "command="])
+            .output()
+            .is_ok_and(|o| command_is_viewer(&String::from_utf8_lossy(&o.stdout)))
     }
+}
+
+/// Whether a process command line is `<...>terminal-windows window ...`: the executable's own name
+/// directly followed by the `window` subcommand. A directory called `terminal-windows` somewhere
+/// in the path, or another program that happens to get an argument `window`, does not count.
+fn command_is_viewer(command: &str) -> bool {
+    command.match_indices("terminal-windows window").any(|(i, m)| {
+        let before_ok = command[..i].chars().next_back().is_none_or(|c| c == '/' || c == '\\' || c.is_whitespace());
+        let after = &command[i + m.len()..];
+        before_ok && after.chars().next().is_none_or(char::is_whitespace)
+    })
 }
 
 fn kill(pid: u32) -> bool {
@@ -130,6 +141,22 @@ pub async fn run_window(service: &VmService, name: &VmName) -> TwResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewer_command_lines() {
+        assert!(command_is_viewer(
+            "/Users/x/Library/Application Support/terminal-windows/TerminalWindows.app/Contents/MacOS/terminal-windows window win11"
+        ));
+        assert!(command_is_viewer("terminal-windows window dev\n"));
+        assert!(
+            !command_is_viewer("/Users/x/Mobile Documents/terminal-windows/target/debug/deps/tw_cli-1a2b window"),
+            "directory name only"
+        );
+        assert!(!command_is_viewer("/usr/bin/vim terminal-windows-notes window"));
+        assert!(!command_is_viewer("/bin/terminal-windows view win11"));
+        assert!(!command_is_viewer("not-terminal-windows window x"), "a different program name");
+        assert!(!command_is_viewer(""));
+    }
 
     #[test]
     fn unrelated_processes_are_never_ours() {

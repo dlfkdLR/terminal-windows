@@ -20,7 +20,7 @@ terminal-windows is **not a hardened malware sandbox.** It will not be described
 - The viewer's frame files (raw guest screen contents) are written 0600 and removed when the viewer exits.
 - The native window runs as its own process; `hide` only terminates a process whose command line is `terminal-windows window ...` (a recycled PID is never killed). Its log (`viewer.log`) stays empty unless `TW_WINDOW_DEBUG` is set, which logs forwarded input events, including keys.
 - No host command is executed from guest data. QEMU, swtpm and qemu-img arguments come only from validated configuration and host-chosen paths (`tw-qemu::cmdline`; no shell; QEMU option commas escaped; swtpm rejects paths containing commas).
-- Resource bounds: frame size, 32 KiB of text, scroll within ±10000, 1 MiB per QMP line, 64 buffered QMP events, 4 MiB per MCP message, 64 queued viewer inputs.
+- Resource bounds: frame size, 32 KiB of text, scroll within ±10000, 1 MiB per QMP line, 64 buffered QMP events, 4 MiB per MCP message, native-window input queue: at most 2048 queued pointer moves and wheel notches and 16,384 queued key or button presses; releases are never dropped, so no key or button can stay stuck in the guest.
 - Logs never contain guest strings, keys or passwords.
 - Downloaded media and firmware are verified against SHA-256 values published by their source (Microsoft's page for ISOs; `SHA256SUMS` of the release for firmware) before they are used.
 

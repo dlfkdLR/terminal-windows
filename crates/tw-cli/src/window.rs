@@ -67,6 +67,11 @@ mod imp {
     /// Pending pointer moves and wheel notches beyond this are dropped (the console is too slow).
     const MAX_QUEUED_LOSSY: usize = 2048;
 
+    /// Key and button *presses* beyond this many queued jobs are dropped too. Releases are always
+    /// queued (a lost release would leave a key stuck), so the queue is bounded by this limit plus
+    /// the number of keys and buttons that can be held at once.
+    const MAX_QUEUED_PRESSES: usize = 16_384;
+
     /// Hands input to the worker without ever blocking. The window thread also drives the async
     /// runtime, where blocking is forbidden (`blocking_send` there aborted the whole window on the
     /// first key press, 0.1.4). Key and button events are never dropped, because a lost release
@@ -90,8 +95,13 @@ mod imp {
             }
         }
 
-        /// For events that must arrive: keys and mouse buttons.
+        /// For keys and mouse buttons: releases always arrive, presses only while the queue is
+        /// below `MAX_QUEUED_PRESSES` (a person cannot type that fast; only a stuck console can).
         pub fn reliable(&self, job: Job) {
+            let is_press = matches!(job, Job::Key { down: true, .. } | Job::Button { down: true, .. });
+            if is_press && self.queued.load(Ordering::Acquire) >= MAX_QUEUED_PRESSES {
+                return;
+            }
             self.push(job);
         }
 
@@ -591,7 +601,7 @@ mod imp {
         }
 
         #[test]
-        fn lossy_input_is_bounded_but_keys_and_buttons_never_are() {
+        fn lossy_input_is_bounded_and_releases_are_never_dropped() {
             let (tx, mut rx) = InputSender::channel();
             let size = (800, 600);
             for i in 0..(MAX_QUEUED_LOSSY as u32 + 500) {
@@ -614,6 +624,25 @@ mod imp {
             tx.taken(MAX_QUEUED_LOSSY + 2);
             tx.lossy(Job::Move { x: 1, y: 1, size });
             assert!(rx.try_recv().is_ok());
+        }
+
+        #[test]
+        fn presses_are_capped_but_releases_still_pass() {
+            let (tx, mut rx) = InputSender::channel();
+            for _ in 0..(MAX_QUEUED_PRESSES + 100) {
+                tx.reliable(Job::Key { qcode: "a", down: true });
+            }
+            tx.reliable(Job::Key { qcode: "a", down: false });
+            let (mut presses, mut releases) = (0, 0);
+            while let Ok(job) = rx.try_recv() {
+                match job {
+                    Job::Key { down: true, .. } => presses += 1,
+                    Job::Key { down: false, .. } => releases += 1,
+                    _ => {}
+                }
+            }
+            assert_eq!(presses, MAX_QUEUED_PRESSES, "presses beyond the cap are dropped");
+            assert_eq!(releases, 1, "a release is never dropped");
         }
 
         #[test]

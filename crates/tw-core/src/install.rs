@@ -6,6 +6,9 @@
 
 use std::path::Path;
 
+use crate::host::Arch;
+use crate::model::NetworkMode;
+
 /// The description Windows gives its UEFI boot entry.
 const BOOT_ENTRY: &str = "Windows Boot Manager";
 
@@ -41,6 +44,32 @@ pub fn disk_is_virgin(disk: &Path) -> bool {
 /// installation) is never wiped automatically; there Setup stays interactive.
 pub fn unattended_allowed(install_iso_attached: bool, efivars: &Path, disk: &Path) -> bool {
     installer_needed(install_iso_attached, windows_registered(efivars)) && disk_is_virgin(disk)
+}
+
+/// What goes on the setup-media CD of a VM start.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct SetupMedia {
+    /// The wipe-capable answer file (`unattended_allowed` and the VM was created with `--unattended`).
+    pub answer_file: bool,
+    /// The NetKVM driver folder for Windows Setup (`$WinPEDriver$`).
+    pub drivers: bool,
+}
+
+/// Decides the setup-media contents. The drivers need no answer file and are harmless, so they
+/// stay while the installer is attached (also lets OOBE's driver picker find them); the answer
+/// file follows the strict `unattended_allowed` rule.
+pub fn setup_media(
+    unattended: bool,
+    install_iso_attached: bool,
+    efivars: &Path,
+    disk: &Path,
+    arch: Arch,
+    network: NetworkMode,
+) -> SetupMedia {
+    SetupMedia {
+        answer_file: unattended && unattended_allowed(install_iso_attached, efivars, disk),
+        drivers: install_iso_attached && arch == Arch::Aarch64 && network == NetworkMode::Nat,
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +114,27 @@ mod tests {
         std::fs::File::create(&disk).unwrap().set_len(7 << 30).unwrap();
         assert!(!unattended_allowed(true, &vars, &disk), "7 GB of data on the disk: a half-finished install is never wiped");
         assert!(!windows_registered(&tmp.path().join("missing")));
+    }
+
+    #[test]
+    fn setup_media_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (vars, disk) = (tmp.path().join("efivars.fd"), tmp.path().join("disk.qcow2"));
+        std::fs::write(&vars, vec![0xffu8; 4096]).unwrap();
+        std::fs::File::create(&disk).unwrap().set_len(300 * 1024).unwrap();
+        let m = |un, att, arch, net| setup_media(un, att, &vars, &disk, arch, net);
+        let (a, x, nat, off) = (Arch::Aarch64, Arch::X86_64, NetworkMode::Nat, NetworkMode::Offline);
+        assert_eq!(m(true, true, a, nat), SetupMedia { answer_file: true, drivers: true });
+        assert_eq!(
+            m(false, true, a, nat),
+            SetupMedia { answer_file: false, drivers: true },
+            "manual install still gets drivers, never an answer file"
+        );
+        assert_eq!(m(true, true, x, nat), SetupMedia { answer_file: true, drivers: false }, "x64 has an inbox NIC driver");
+        assert_eq!(m(true, true, a, off), SetupMedia { answer_file: true, drivers: false }, "no NIC, no driver");
+        assert_eq!(m(true, false, a, nat), SetupMedia { answer_file: false, drivers: false }, "installer detached");
+        // A disk with data is never wiped automatically, but the drivers stay.
+        std::fs::File::create(&disk).unwrap().set_len(5 << 30).unwrap();
+        assert_eq!(m(true, true, a, nat), SetupMedia { answer_file: false, drivers: true });
     }
 }

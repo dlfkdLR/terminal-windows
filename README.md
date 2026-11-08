@@ -147,3 +147,21 @@ Documentation: [architecture](docs/architecture.md) · [protocol](docs/protocol.
 ## License
 
 MIT. Parts adapted from upstream terminal-mac (MIT, Copyright (c) 2026 Govijr) are listed in [docs/PROVENANCE.md](docs/PROVENANCE.md) and noted in the header of each affected file.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `terminal-windows` / `up` | Guided setup: firmware, Windows ISO, VM creation, boot, view (`--auto`, `--custom`) |
+| `view`, `show`, `hide` | Desktop in a Kitty-graphics terminal (Ghostty, Kitty, WezTerm) or the native window; `hide` leaves the VM running |
+| `ls`, `status`, `start`, `stop [--force]`, `pause`, `resume`, `logs`, `config`, `delete --force` | VM lifecycle |
+| `create <name> --unattended [--cpus --memory --disk --offline --iso --drivers-iso]` | Create a VM without the guided flow |
+| `image download`, `firmware install`, `doctor` | Verified Windows ISO, Secure Boot firmware, host check |
+| `action <name> screenshot / click / type / key / scroll / drag / move / status` | Computer-use actions on a running VM |
+| `mcp` | MCP server on stdio for agents |
+
+Add `--json` to any command for machine-readable output. To update, run the install command again.
+
+### Network on ARM64
+
+Windows 11 ARM64 has no inbox driver for any NIC QEMU can emulate. The VM uses virtio-net and the Microsoft-signed NetKVM driver from virtio-win (BSD-3-Clause, bundled unmodified, see `docs/PROVENANCE.md`) is placed on the setup-media CD in `$WinPEDriver$`. A VM whose Windows installation was already started with an older version does not get the driver retroactively: create a new VM, or install it from OOBE's "Install driver" picker (the CD stays attached while the installer ISO is attached).
