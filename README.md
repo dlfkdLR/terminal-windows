@@ -156,11 +156,12 @@ MIT. Parts adapted from upstream terminal-mac (MIT, Copyright (c) 2026 Govijr) a
 | `view`, `show`, `hide` | Desktop in a Kitty-graphics terminal (Ghostty, Kitty, WezTerm) or the native window; `hide` leaves the VM running |
 | `ls`, `status`, `start`, `stop [--force]`, `pause`, `resume`, `logs`, `config`, `delete --force` | VM lifecycle |
 | `create <name> --unattended [--cpus --memory --disk --offline --iso --drivers-iso]` | Create a VM without the guided flow |
+| `update [--check]` | Update to the latest release |
 | `image download`, `firmware install`, `doctor` | Verified Windows ISO, Secure Boot firmware, host check |
 | `action <name> screenshot / click / type / key / scroll / drag / move / status` | Computer-use actions on a running VM |
 | `mcp` | MCP server on stdio for agents |
 
-Add `--json` to any command for machine-readable output. To update, run the install command again.
+Add `--json` to any command for machine-readable output. To update, run `terminal-windows update` (`--check` only looks); it runs the new release's installer, which verifies the download's SHA-256, and only touches an installed copy in `<prefix>/bin`. The installer also installs QEMU and swtpm with Homebrew on macOS (`TW_SKIP_DEPS=1` skips that).
 
 ### Network on ARM64
 

@@ -6,7 +6,8 @@
 # Downloads the latest release for this machine, verifies its SHA-256 against
 # the release's SHA256SUMS, and installs one binary into ~/.local/bin.
 # Needs no administrator rights and does not edit shell configuration.
-# Options (environment): TW_PREFIX=/abs/path (default ~/.local), TW_VERSION=v0.1.0, TW_REPO=owner/name
+# Options (environment): TW_PREFIX=/abs/path (default ~/.local), TW_VERSION=v0.1.0, TW_REPO=owner/name,
+# TW_SKIP_DEPS=1 (do not install QEMU and swtpm with Homebrew)
 set -euo pipefail
 
 REPO="${TW_REPO:-dlfkdLR/terminal-windows}"
@@ -64,7 +65,23 @@ case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
   *) say "Add $PREFIX/bin to your PATH to run 'terminal-windows'." ;;
 esac
-if [ "$os" = apple-darwin ] && ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
-  say "Next: brew install qemu swtpm"
+# QEMU and swtpm run the Windows VM. On macOS with Homebrew they are installed now, so the first
+# `terminal-windows` run does not have to wait for it. Set TW_SKIP_DEPS=1 to skip this.
+if [ "$os" = apple-darwin ] && [ "${TW_SKIP_DEPS:-0}" != 1 ]; then
+  missing=""
+  command -v qemu-system-aarch64 >/dev/null 2>&1 || command -v qemu-system-x86_64 >/dev/null 2>&1 || missing=" qemu"
+  command -v swtpm >/dev/null 2>&1 || missing="$missing swtpm"
+  missing="${missing# }"
+  if [ -n "$missing" ]; then
+    if command -v brew >/dev/null 2>&1; then
+      say "Installing $missing with Homebrew ..."
+      # shellcheck disable=SC2086
+      brew install $missing || say "warning: 'brew install $missing' failed; 'terminal-windows' will retry it."
+    else
+      say "Next: install $missing (Homebrew: https://brew.sh, then: brew install $missing)"
+    fi
+  fi
+elif [ "$os" = unknown-linux-gnu ]; then
+  say "Linux: install qemu-system and swtpm with your package manager."
 fi
-say "Then: terminal-windows doctor"
+say "Then run: terminal-windows"

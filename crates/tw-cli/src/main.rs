@@ -22,6 +22,7 @@ mod geometry;
 mod media;
 mod prompt;
 mod up;
+mod update;
 mod view;
 mod window;
 mod window_ctl;
@@ -43,6 +44,12 @@ struct Cli {
 enum Command {
     /// Check the host: QEMU, accelerator, UEFI firmware, TPM, terminal.
     Doctor,
+    /// Update terminal-windows to the latest release (runs the release's verified installer).
+    Update {
+        /// Only report whether a newer release exists.
+        #[arg(long)]
+        check: bool,
+    },
     /// Installation media helpers.
     Image {
         #[command(subcommand)]
@@ -444,6 +451,23 @@ async fn run(cli: Cli, out: &Output) -> TwResult<()> {
                 }
             });
             out.emit(value, |v| serde_json::to_string_pretty(v).unwrap_or_default());
+        }
+        Command::Update { check } => {
+            let status = update::check().await?;
+            let mut updated = false;
+            if status.update_available && !check {
+                update::install(&format!("v{}", status.latest)).await?;
+                updated = true;
+            }
+            let value = json!({ "current": status.current, "latest": status.latest, "update_available": status.update_available, "updated": updated });
+            out.emit(value, |v| {
+                let (cur, latest) = (v["current"].as_str().unwrap_or(""), v["latest"].as_str().unwrap_or(""));
+                match (v["update_available"].as_bool(), v["updated"].as_bool()) {
+                    (Some(true), Some(true)) => format!("Updated {cur} -> {latest}."),
+                    (Some(true), _) => format!("Update available: {cur} -> {latest}. Run `terminal-windows update`."),
+                    _ => format!("terminal-windows {cur} is up to date."),
+                }
+            });
         }
         Command::Firmware { command } => firmware_cmd::run(command, &store, host, out).await?,
         Command::Image { command } => media::run(command, &store, host, out).await?,

@@ -108,10 +108,12 @@ The guest agent's `cfg(windows)` code (`win32.rs`) now compiles and lints in CI 
 | `-chardev pipe` server and QMP on QEMU for Windows | ⏳ |
 | virtio-serial throughput | ⏳ benchmark planned |
 | Windows Setup passes the TPM check with `ppi=off` | ✅ (requirement screen passed) |
-| Windows 11 networking without a virtio driver on ARM64 | ⏳ to be tested in OOBE |
+| Windows 11 networking without a virtio driver on ARM64 | ❌ OOBE stops at "Connect to a network" (see the OOBE row above; superseded by the bundled NetKVM driver) |
 
 ## Intentionally unsupported
 
 - x64 Windows on Apple Silicon (TCG emulation): refused
 - ARM64 Windows on x64 hosts: refused
 - Inline graphics inside tmux or screen: native-window fallback
+| `terminal-windows update` (0.1.10, 2026-11-09, macOS arm64) | ✅ A copy built as 0.1.0 installed into a scratch prefix updated itself to 0.1.9 through the release's `get.sh` (SHA-256 verified by the script); `--check` and `--json` report the versions; a source build (`target/debug`) is refused. The Windows path only prints the `install.ps1` hint and was not run |
+| `get.sh` installs QEMU and swtpm (2026-11-09) | ⚠️ The branches (both missing, `TW_SKIP_DEPS=1`, no Homebrew) were run against a **stub** `brew`; a real `brew install qemu swtpm` was not run by this script because both were already installed |
